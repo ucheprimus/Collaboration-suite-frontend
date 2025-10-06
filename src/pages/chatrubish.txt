@@ -1,0 +1,454 @@
+import { useEffect, useState, useRef } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { io } from "socket.io-client";
+
+// Socket.io connection
+const socket = io("http://localhost:4000", { transports: ["websocket"] });
+
+interface Profile {
+  id: string;
+  full_name?: string;
+  avatar_url?: string;
+  online?: boolean;
+}
+
+interface Channel {
+  id: string;
+  name: string;
+}
+
+export default function ChatPage() {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [profiles, setProfiles] = useState<Record<string, Profile>>({});
+  const [text, setText] = useState("");
+  const [user, setUser] = useState<any>(null);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [activeChannel, setActiveChannel] = useState<string | null>(null);
+  const [allUsers, setAllUsers] = useState<Profile[]>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [newGroupName, setNewGroupName] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to bottom whenever messages update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Restore user from localStorage
+  useEffect(() => {
+    const storedUser = localStorage.getItem("user");
+    if (storedUser) setUser(JSON.parse(storedUser));
+  }, []);
+
+  // Fetch profiles for display & group creation
+  useEffect(() => {
+    const fetchProfiles = async () => {
+      const { data } = await supabase.from("profiles").select("*");
+      if (data) {
+        const map: Record<string, Profile> = {};
+        data.forEach((p) => (map[p.id] = p));
+        setProfiles(map);
+        setAllUsers(data);
+      }
+    };
+    fetchProfiles();
+  }, []);
+
+  // Fetch channels the user belongs to
+
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchChannels = async () => {
+      try {
+        // Step 1: get channel_ids from channel_members
+        const { data: memberships, error: memError } = await supabase
+          .from("channel_members")
+          .select("channel_id")
+          .eq("user_id", user.id);
+
+        if (memError) throw memError;
+        if (!memberships || memberships.length === 0) {
+          setChannels([]);
+          return;
+        }
+
+        const channelIds = memberships.map((m: any) => m.channel_id);
+
+        // Step 2: get channel details
+        const { data: chans, error: chanError } = await supabase
+          .from("channels")
+          .select("*")
+          .in("id", channelIds);
+
+        if (chanError) throw chanError;
+
+        setChannels(chans);
+        if (!activeChannel && chans.length) setActiveChannel(chans[0].id);
+      } catch (err) {
+        console.error("Error fetching channels:", err);
+      }
+    };
+
+    fetchChannels();
+  }, [user]);
+
+  // Fetch messages for active channel
+  useEffect(() => {
+    if (!activeChannel) return;
+
+    const fetchMessages = async () => {
+      const { data } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("channel_id", activeChannel)
+        .order("created_at", { ascending: true });
+
+      setMessages(data || []);
+    };
+
+    fetchMessages();
+  }, [activeChannel]);
+
+  // Join Socket.io room
+  useEffect(() => {
+    if (!user || !activeChannel) return;
+    socket.emit("join", { channel_id: activeChannel });
+  }, [user, activeChannel]);
+
+  // Listen to messages in the active channel
+
+  useEffect(() => {
+    socket.on("message:new", (msg) => {
+      // server emits "message:new"
+      if (msg.channel_id === activeChannel)
+        setMessages((prev) => [...prev, msg]);
+    });
+    return () => socket.off("message:new");
+  }, [activeChannel]);
+
+  const sendMessage = async () => {
+    if (!text.trim() || !user || !activeChannel) return;
+
+    const newMessage = {
+      user_id: user.id,
+      username: user.username || "",
+      channel_id: activeChannel,
+      text: text.trim(),
+    };
+
+
+    const { data: insertedMessage, error } = await supabase
+      .from("messages")
+      .insert([newMessage])
+      .select()
+      .single();
+  if (error) {
+    console.error("Error saving message:", error);
+    return;
+  }
+
+  // 2. Emit to socket (so others get it in real-time)
+  socket.emit("message", insertedMessage);
+
+  // 3. Optimistically update UI immediately
+  setMessages((prev) => [...prev, insertedMessage]);
+  setText("");
+  };
+
+  const toggleUserSelection = (id: string) => {
+    setSelectedUsers((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const createGroup = async () => {
+    if (!user || !selectedUsers.length || !newGroupName.trim()) return;
+
+    // Create channel
+    const { data: newChannel } = await supabase
+      .from("channels")
+      .insert([{ name: newGroupName.trim(), created_by: user.id }])
+      .select()
+      .single();
+
+    if (!newChannel) return;
+
+    // Add members
+    const members = [user.id, ...selectedUsers];
+    await supabase
+      .from("channel_members")
+      .insert(
+        members.map((uid) => ({ channel_id: newChannel.id, user_id: uid }))
+      );
+
+    // Refresh UI
+    setChannels((prev) => [
+      ...prev,
+      { id: newChannel.id, name: newChannel.name },
+    ]);
+    setActiveChannel(newChannel.id);
+    setShowCreateModal(false);
+    setSelectedUsers([]);
+    setNewGroupName("");
+  };
+
+  const getProfile = (id: string) => profiles[id] || {};
+
+  return (
+    <div style={{ display: "flex", height: "100%" }}>
+      {/* Sidebar */}
+      <div
+        style={{
+          width: "280px",
+          flexShrink: 0,
+          borderRight: "1px solid #dee2e6",
+          padding: "10px",
+          backgroundColor: "#f1f3f5",
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+        }}
+      >
+        <h5>Channels / Groups</h5>
+        {channels.map((ch) => (
+          <button
+            key={ch.id}
+            onClick={() => setActiveChannel(ch.id)}
+            style={{
+              padding: "8px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: ch.id === activeChannel ? "#0d6efd" : "#e9ecef",
+              color: ch.id === activeChannel ? "#fff" : "#212529",
+              cursor: "pointer",
+            }}
+          >
+            {ch.name}
+          </button>
+        ))}
+        <button
+          onClick={() => setShowCreateModal(true)}
+          style={{
+            marginTop: "10px",
+            padding: "8px",
+            borderRadius: "6px",
+            border: "none",
+            backgroundColor: "#198754",
+            color: "#fff",
+            cursor: "pointer",
+          }}
+        >
+          + Create Group
+        </button>
+      </div>
+
+      {/* Main Chat Panel */}
+      <div
+        style={{
+          flexGrow: 1,
+          flexShrink: 1,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          padding: "10px",
+        }}
+      >
+        <h4>
+          {activeChannel
+            ? channels.find((c) => c.id === activeChannel)?.name.toUpperCase()
+            : "Select a Group"}
+        </h4>
+
+        {/* Messages */}
+        <div
+          style={{
+            flexGrow: 1,
+            padding: "10px",
+            border: "1px solid #dee2e6",
+            borderRadius: "8px",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+            backgroundColor: "#f8f9fa",
+          }}
+        >
+          {messages.map((m, i) => {
+            const isMine = user && m.user_id === user.id;
+            const profile = getProfile(m.user_id);
+            const name = profile.full_name || "";
+
+            return (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  justifyContent: isMine ? "flex-end" : "flex-start",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "10px",
+                    maxWidth: "70%",
+                    backgroundColor: isMine ? "#0d6efd" : "#e9ecef",
+                    color: isMine ? "#fff" : "#212529",
+                    padding: "10px 15px",
+                    borderRadius: "12px",
+                    wordWrap: "break-word",
+                  }}
+                >
+                  {!isMine && (
+                    <img
+                      src={profile.avatar_url || "/default-avatar.png"}
+                      alt={name}
+                      style={{
+                        width: "40px",
+                        height: "40px",
+                        borderRadius: "50%",
+                        objectFit: "cover",
+                      }}
+                    />
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    {!isMine && name && (
+                      <div style={{ fontWeight: "bold", marginBottom: "3px" }}>
+                        {name}
+                      </div>
+                    )}
+                    <div>{m.text}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input */}
+        <div style={{ display: "flex", marginTop: "10px", gap: "10px" }}>
+          <input
+            type="text"
+            style={{
+              flexGrow: 1,
+              padding: "10px",
+              borderRadius: "8px",
+              border: "1px solid #ced4da",
+            }}
+            placeholder="Type a message..."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            disabled={!user || !activeChannel}
+          />
+          <button
+            style={{
+              padding: "10px 20px",
+              borderRadius: "8px",
+              border: "none",
+              backgroundColor: "#0d6efd",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+            onClick={sendMessage}
+            disabled={!user || !activeChannel || !text.trim()}
+          >
+            Send
+          </button>
+        </div>
+      </div>
+
+      {/* Create Group Modal */}
+      {showCreateModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "#fff",
+              padding: "20px",
+              borderRadius: "8px",
+              width: "400px",
+              maxHeight: "80%",
+              overflowY: "auto",
+            }}
+          >
+            <h5>Create New Group</h5>
+            <input
+              type="text"
+              placeholder="Group Name"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "8px",
+                marginBottom: "10px",
+                borderRadius: "6px",
+                border: "1px solid #ced4da",
+              }}
+            />
+            <h6>Select Members:</h6>
+            {allUsers
+              .filter((u) => u.id !== user?.id)
+              .map((u) => (
+                <div key={u.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selectedUsers.includes(u.id)}
+                      onChange={() => toggleUserSelection(u.id)}
+                    />{" "}
+                    {u.full_name || u.id}
+                  </label>
+                </div>
+              ))}
+            <div
+              style={{
+                marginTop: "10px",
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "10px",
+              }}
+            >
+              <button
+                onClick={() => setShowCreateModal(false)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #ced4da",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={createGroup}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: "#198754",
+                  color: "#fff",
+                }}
+                disabled={!newGroupName.trim() || !selectedUsers.length}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

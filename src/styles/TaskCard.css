@@ -1,0 +1,57 @@
+/* TaskCard.css */
+
+.task-card {
+  border-radius: 8px;
+  transition: transform 0.1s ease-in-out;
+  overflow: hidden; /* prevent content spilling */
+  display: flex;
+  flex-direction: column;
+}
+
+.task-card:hover {
+  transform: translateY(-3px);
+}
+
+/* Clamp description to 3 lines */
+.task-desc {
+  max-height: 4.5em; /* ~3 lines */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+/* Priority badges */
+.badge.priority-high {
+  background-color: #dc3545; /* red */
+  color: white;
+}
+.badge.priority-medium {
+  background-color: #ffc107; /* yellow */
+  color: black;
+}
+.badge.priority-low {
+  background-color: #198754; /* green */
+  color: white;
+}
+
+/* Metadata styling */
+.task-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #6c757d;
+}
+
+.task-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.task-meta span::before {
+  /* optional icons handled in JSX */
+}
