@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import type { Task } from "../types";
+
 import "../styles/TaskCard.css";
 
 import {
@@ -22,6 +23,15 @@ const columns = {
 interface Profile {
   id: string;
   full_name: string;
+}
+interface Task {
+  id?: string;
+  title: string;
+  description?: string;
+  status: "todo" | "in-progress" | "done";
+  assignee?: string;
+  due_date?: string;
+  priority: "low" | "medium" | "high";
 }
 
 export default function KanbanPage() {

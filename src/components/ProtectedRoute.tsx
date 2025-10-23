@@ -12,24 +12,40 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const [isAuth, setIsAuth] = useState(false);
 
   useEffect(() => {
-    const checkAuth = async () => {
-      const { data } = await supabase.auth.getSession();
-      setIsAuth(!!data.session);
-      setLoading(false);
+    let mounted = true;
+
+    const checkSession = async () => {
+      console.log("🟡 [ProtectedRoute] Checking session...");
+      const { data, error } = await supabase.auth.getSession();
+
+      if (error) {
+        console.error("❌ [ProtectedRoute] Session error:", error.message);
+      }
+
+      if (mounted) {
+        const session = data?.session;
+        console.log("📦 [ProtectedRoute] Session:", session ? "✅ Found" : "❌ None");
+        setIsAuth(!!session);
+        setLoading(false);
+      }
     };
 
-    // Listen for auth state changes (login/logout)
+    // Initial check
+    checkSession();
+
+    // Listen for auth changes
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log("🔄 [ProtectedRoute] Auth event:", _event);
       setIsAuth(!!session);
+      setLoading(false);
     });
 
-    checkAuth();
-
     return () => {
+      mounted = false;
       listener.subscription.unsubscribe();
     };
   }, []);
 
-  if (loading) return <p>Loading...</p>;
+  if (loading) return <p>Loading dashboard...</p>;
   return isAuth ? <>{children}</> : <Navigate to="/login" replace />;
 }

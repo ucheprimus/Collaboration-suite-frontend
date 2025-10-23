@@ -1,9 +1,7 @@
+// src/pages/ChatPage.tsx
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { io } from "socket.io-client";
-
-// Socket.io connection
-const socket = io("http://localhost:4000", { transports: ["websocket"] });
+import { io, type Socket } from "socket.io-client";
 
 interface Profile {
   id: string;
@@ -15,6 +13,8 @@ interface Profile {
 interface Channel {
   id: string;
   name: string;
+  is_dm?: boolean;
+  other_user_id?: string;
 }
 
 export default function ChatPage() {
@@ -26,25 +26,140 @@ export default function ChatPage() {
   const [activeChannel, setActiveChannel] = useState<string | null>(null);
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showDMModal, setShowDMModal] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [newGroupName, setNewGroupName] = useState("");
+  const [activeTab, setActiveTab] = useState<"dm" | "group">("dm");
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const activeChannelRef = useRef<string | null>(activeChannel);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Scroll to bottom whenever messages update
+  useEffect(() => {
+    activeChannelRef.current = activeChannel;
+  }, [activeChannel]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Restore user from localStorage
+  // Auth setup
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    if (storedUser) setUser(JSON.parse(storedUser));
+    let mounted = true;
+
+    const init = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!mounted) return;
+      if (data?.session?.user) {
+        setUser(data.session.user);
+      } else {
+        setUser(null);
+      }
+    };
+
+    init();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user ?? null);
+      }
+    );
+
+    return () => {
+      mounted = false;
+      try {
+        listener.subscription.unsubscribe();
+      } catch {}
+    };
   }, []);
 
-  // Fetch profiles for display & group creation
+  // Socket setup
+  useEffect(() => {
+    if (!user) {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      return;
+    }
+
+    if (socketRef.current) return;
+
+    const setupSocket = async () => {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+
+      if (!token) {
+        console.warn("⚠️ No Supabase access token found");
+        return;
+      }
+
+      const socket = io("http://localhost:4000", {
+        transports: ["websocket"],
+        auth: { token },
+        withCredentials: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+      });
+
+      socketRef.current = socket;
+
+      socket.on("connect", () => {
+        console.log("✅ Socket connected:", socket.id);
+      });
+
+      socket.on("connect_error", (err: any) => {
+        console.error("❌ Socket connection error:", err.message);
+      });
+
+      socket.on("disconnect", (reason: any) => {
+        console.log("⚠️ Socket disconnected:", reason);
+      });
+
+      const handler = (msg: any) => {
+        if (msg?.channel_id && msg.channel_id === activeChannelRef.current) {
+          setMessages((prev) => [...prev, msg]);
+        }
+      };
+
+      socket.on("message:new", handler);
+
+      socket.on("messages", (msgs: any[]) => {
+        if (!activeChannelRef.current) return;
+        const filtered = msgs.filter(
+          (m) => m.channel_id === activeChannelRef.current
+        );
+        setMessages(filtered);
+      });
+
+      socket.on("error", (err: any) => {
+        console.warn("Socket error:", err);
+      });
+    };
+
+    setupSocket();
+
+    return () => {
+      if (socketRef.current) {
+        try {
+          socketRef.current.off("message:new");
+          socketRef.current.off("messages");
+          socketRef.current.disconnect();
+        } catch {}
+        socketRef.current = null;
+      }
+    };
+  }, [user]);
+
+  // Fetch profiles
   useEffect(() => {
     const fetchProfiles = async () => {
-      const { data } = await supabase.from("profiles").select("*");
+      const { data, error } = await supabase.from("profiles").select("*");
+      if (error) {
+        console.error("Error fetching profiles:", error);
+        return;
+      }
       if (data) {
         const map: Record<string, Profile> = {};
         data.forEach((p) => (map[p.id] = p));
@@ -55,14 +170,12 @@ export default function ChatPage() {
     fetchProfiles();
   }, []);
 
-  // Fetch channels the user belongs to
-
+  // Fetch channels (groups + DMs)
   useEffect(() => {
     if (!user) return;
 
     const fetchChannels = async () => {
       try {
-        // Step 1: get channel_ids from channel_members
         const { data: memberships, error: memError } = await supabase
           .from("channel_members")
           .select("channel_id")
@@ -76,7 +189,6 @@ export default function ChatPage() {
 
         const channelIds = memberships.map((m: any) => m.channel_id);
 
-        // Step 2: get channel details
         const { data: chans, error: chanError } = await supabase
           .from("channels")
           .select("*")
@@ -84,19 +196,49 @@ export default function ChatPage() {
 
         if (chanError) throw chanError;
 
-        setChannels(chans);
-        if (!activeChannel && chans.length) setActiveChannel(chans[0].id);
+        // For DM channels, fetch the other user's name
+        const channelsWithNames = await Promise.all(
+          (chans || []).map(async (ch) => {
+            if (ch.is_dm) {
+              const { data: members } = await supabase
+                .from("channel_members")
+                .select("user_id")
+                .eq("channel_id", ch.id);
+
+              const otherUserId = members?.find(
+                (m) => m.user_id !== user.id
+              )?.user_id;
+
+              if (otherUserId) {
+                const otherProfile = profiles[otherUserId];
+                return {
+                  ...ch,
+                  name: otherProfile?.full_name || "Unknown User",
+                  other_user_id: otherUserId,
+                };
+              }
+            }
+            return ch;
+          })
+        );
+
+        setChannels(channelsWithNames || []);
+        if (!activeChannel && channelsWithNames && channelsWithNames.length)
+          setActiveChannel(channelsWithNames[0].id);
       } catch (err) {
         console.error("Error fetching channels:", err);
       }
     };
 
     fetchChannels();
-  }, [user]);
+  }, [user, profiles]);
 
   // Fetch messages for active channel
   useEffect(() => {
-    if (!activeChannel) return;
+    if (!activeChannel) {
+      setMessages([]);
+      return;
+    }
 
     const fetchMessages = async () => {
       const { data } = await supabase
@@ -109,54 +251,102 @@ export default function ChatPage() {
     };
 
     fetchMessages();
-  }, [activeChannel]);
 
-  // Join Socket.io room
-  useEffect(() => {
-    if (!user || !activeChannel) return;
-    socket.emit("join", { channel_id: activeChannel });
-  }, [user, activeChannel]);
+    if (socketRef.current) {
+      socketRef.current.emit("join", { channel_id: activeChannel });
+    }
+  }, [activeChannel, user]);
 
-  // Listen to messages in the active channel
-
-  useEffect(() => {
-    socket.on("message:new", (msg) => {
-      // server emits "message:new"
-      if (msg.channel_id === activeChannel)
-        setMessages((prev) => [...prev, msg]);
-    });
-    return () => socket.off("message:new");
-  }, [activeChannel]);
-
-  const sendMessage = async () => {
-    if (!text.trim() || !user || !activeChannel) return;
-
-    const newMessage = {
-      user_id: user.id,
-      username: user.username || "",
-      channel_id: activeChannel,
-      text: text.trim(),
-    };
-
-
-    const { data: insertedMessage, error } = await supabase
-      .from("messages")
-      .insert([newMessage])
-      .select()
-      .single();
-  if (error) {
-    console.error("Error saving message:", error);
-    return;
-  }
-
-  // 2. Emit to socket (so others get it in real-time)
-  socket.emit("message", insertedMessage);
-
-  // 3. Optimistically update UI immediately
-  setMessages((prev) => [...prev, insertedMessage]);
-  setText("");
+  // Handle file selection
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files) {
+      setAttachedFiles(Array.from(files));
+    }
   };
 
+  // Remove attached file
+  const removeFile = (index: number) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Send message (text or files)
+  const sendMessage = async () => {
+    if (!user || !activeChannel) return;
+    if (!text.trim() && attachedFiles.length === 0) return;
+
+    // Send text message if present
+    if (text.trim() && attachedFiles.length === 0) {
+      const payload = {
+        channel_id: activeChannel,
+        user_id: user.id,
+        username: user.user_metadata?.full_name || user.email || "",
+        text: text.trim(),
+        file_url: null,
+        file_name: null,
+        mime_type: null,
+        type: "text" as const,
+      };
+
+      console.log("📤 Sending text message:", payload);
+      socketRef.current?.emit("message", payload);
+      setText("");
+      return;
+    }
+
+    // Send files
+    for (const file of attachedFiles) {
+      console.log("📁 Uploading file:", file.name);
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("chat_uploads")
+        .upload(`uploads/${Date.now()}_${file.name}`, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: file.type,
+        });
+
+      if (uploadError) {
+        console.error("❌ File upload failed:", uploadError);
+        continue;
+      }
+
+      const { data: signedUrlData } = await supabase.storage
+        .from("chat_uploads")
+        .createSignedUrl(uploadData.path, 60 * 60 * 24 * 7); // 7 days
+
+      const file_url = signedUrlData?.signedUrl ?? null;
+      const file_name = file.name;
+      const mime_type = file.type;
+
+      let type: "text" | "image" | "file" | "video" | "audio" = "file";
+      if (file.type.startsWith("image/")) type = "image";
+      else if (file.type.startsWith("video/")) type = "video";
+      else if (file.type.startsWith("audio/")) type = "audio";
+
+      const payload = {
+        channel_id: activeChannel,
+        user_id: user.id,
+        username: user.user_metadata?.full_name || user.email || "",
+        text: text.trim() || null,
+        file_url,
+        file_name,
+        mime_type,
+        type,
+      };
+
+      console.log("📤 Sending file message:", payload);
+      socketRef.current?.emit("message", payload);
+    }
+
+    setText("");
+    setAttachedFiles([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // Create group
   const toggleUserSelection = (id: string) => {
     setSelectedUsers((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -166,35 +356,126 @@ export default function ChatPage() {
   const createGroup = async () => {
     if (!user || !selectedUsers.length || !newGroupName.trim()) return;
 
-    // Create channel
-    const { data: newChannel } = await supabase
-      .from("channels")
-      .insert([{ name: newGroupName.trim(), created_by: user.id }])
-      .select()
-      .single();
+    try {
+      const { data: newChannel, error: chErr } = await supabase
+        .from("channels")
+        .insert([
+          {
+            name: newGroupName.trim(),
+            created_by: user.id,
+            is_dm: false,
+          },
+        ])
+        .select()
+        .single();
 
-    if (!newChannel) return;
+      if (chErr) throw chErr;
+      if (!newChannel) return;
 
-    // Add members
-    const members = [user.id, ...selectedUsers];
-    await supabase
-      .from("channel_members")
-      .insert(
-        members.map((uid) => ({ channel_id: newChannel.id, user_id: uid }))
-      );
+      const members = [user.id, ...selectedUsers];
+      const { error: memErr } = await supabase
+        .from("channel_members")
+        .insert(
+          members.map((uid) => ({ channel_id: newChannel.id, user_id: uid }))
+        );
 
-    // Refresh UI
-    setChannels((prev) => [
-      ...prev,
-      { id: newChannel.id, name: newChannel.name },
-    ]);
-    setActiveChannel(newChannel.id);
-    setShowCreateModal(false);
-    setSelectedUsers([]);
-    setNewGroupName("");
+      if (memErr) throw memErr;
+
+      setChannels((prev) => [
+        ...prev,
+        { id: newChannel.id, name: newChannel.name, is_dm: false },
+      ]);
+      setActiveChannel(newChannel.id);
+      setActiveTab("group");
+      setShowCreateModal(false);
+      setSelectedUsers([]);
+      setNewGroupName("");
+    } catch (err) {
+      console.error("Create group error:", err);
+    }
+  };
+
+  // Create DM
+  const createDM = async (otherUserId: string) => {
+    if (!user) return;
+
+    try {
+      // Check if DM already exists
+      const { data: existingChannels } = await supabase
+        .from("channel_members")
+        .select("channel_id")
+        .eq("user_id", user.id);
+
+      if (existingChannels) {
+        for (const membership of existingChannels) {
+          const { data: channelMembers } = await supabase
+            .from("channel_members")
+            .select("user_id, channels!inner(is_dm)")
+            .eq("channel_id", membership.channel_id);
+
+          if (channelMembers && channelMembers.length === 2) {
+            const isDM = channelMembers[0]?.channels?.is_dm;
+            const hasOtherUser = channelMembers.some(
+              (m) => m.user_id === otherUserId
+            );
+
+            if (isDM && hasOtherUser) {
+              setActiveChannel(membership.channel_id);
+              setActiveTab("dm");
+              setShowDMModal(false);
+              return;
+            }
+          }
+        }
+      }
+
+      // Create new DM channel
+      const otherProfile = profiles[otherUserId];
+      const dmName = `DM: ${otherProfile?.full_name || "User"}`;
+
+      const { data: newChannel, error: chErr } = await supabase
+        .from("channels")
+        .insert([
+          {
+            name: dmName,
+            created_by: user.id,
+            is_dm: true,
+          },
+        ])
+        .select()
+        .single();
+
+      if (chErr) throw chErr;
+      if (!newChannel) return;
+
+      const { error: memErr } = await supabase.from("channel_members").insert([
+        { channel_id: newChannel.id, user_id: user.id },
+        { channel_id: newChannel.id, user_id: otherUserId },
+      ]);
+
+      if (memErr) throw memErr;
+
+      setChannels((prev) => [
+        ...prev,
+        {
+          id: newChannel.id,
+          name: otherProfile?.full_name || "Unknown User",
+          is_dm: true,
+          other_user_id: otherUserId,
+        },
+      ]);
+      setActiveChannel(newChannel.id);
+      setActiveTab("dm");
+      setShowDMModal(false);
+    } catch (err) {
+      console.error("Create DM error:", err);
+    }
   };
 
   const getProfile = (id: string) => profiles[id] || {};
+
+  const dmChannels = channels.filter((ch) => ch.is_dm);
+  const groupChannels = channels.filter((ch) => !ch.is_dm);
 
   return (
     <div style={{ display: "flex", height: "100%" }}>
@@ -204,44 +485,173 @@ export default function ChatPage() {
           width: "280px",
           flexShrink: 0,
           borderRight: "1px solid #dee2e6",
-          padding: "10px",
           backgroundColor: "#f1f3f5",
           display: "flex",
           flexDirection: "column",
-          gap: "10px",
         }}
       >
-        <h5>Channels / Groups</h5>
-        {channels.map((ch) => (
+        <div style={{ padding: "10px" }}>
+          <h5 style={{ margin: "0 0 10px 0" }}>Chats</h5>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", borderBottom: "2px solid #dee2e6" }}>
           <button
-            key={ch.id}
-            onClick={() => setActiveChannel(ch.id)}
+            onClick={() => setActiveTab("dm")}
             style={{
-              padding: "8px",
-              borderRadius: "6px",
+              flex: 1,
+              padding: "12px",
               border: "none",
-              backgroundColor: ch.id === activeChannel ? "#0d6efd" : "#e9ecef",
-              color: ch.id === activeChannel ? "#fff" : "#212529",
+              backgroundColor: activeTab === "dm" ? "#fff" : "transparent",
+              borderBottom: activeTab === "dm" ? "3px solid #0d6efd" : "none",
               cursor: "pointer",
+              fontWeight: activeTab === "dm" ? "bold" : "normal",
+              color: activeTab === "dm" ? "#0d6efd" : "#6c757d",
             }}
           >
-            {ch.name}
+            💬 Direct
           </button>
-        ))}
-        <button
-          onClick={() => setShowCreateModal(true)}
+          <button
+            onClick={() => setActiveTab("group")}
+            style={{
+              flex: 1,
+              padding: "12px",
+              border: "none",
+              backgroundColor: activeTab === "group" ? "#fff" : "transparent",
+              borderBottom:
+                activeTab === "group" ? "3px solid #0d6efd" : "none",
+              cursor: "pointer",
+              fontWeight: activeTab === "group" ? "bold" : "normal",
+              color: activeTab === "group" ? "#0d6efd" : "#6c757d",
+            }}
+          >
+            👥 Groups
+          </button>
+        </div>
+
+        {/* Channel List */}
+        <div
           style={{
-            marginTop: "10px",
-            padding: "8px",
-            borderRadius: "6px",
-            border: "none",
-            backgroundColor: "#198754",
-            color: "#fff",
-            cursor: "pointer",
+            flexGrow: 1,
+            overflowY: "auto",
+            padding: "10px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
           }}
         >
-          + Create Group
-        </button>
+          {activeTab === "dm" ? (
+            <>
+              {dmChannels.map((ch) => (
+                <button
+                  key={ch.id}
+                  onClick={() => setActiveChannel(ch.id)}
+                  style={{
+                    padding: "10px",
+                    borderRadius: "6px",
+                    border: "none",
+                    backgroundColor:
+                      ch.id === activeChannel ? "#0d6efd" : "#fff",
+                    color: ch.id === activeChannel ? "#fff" : "#212529",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                  }}
+                >
+                  💬 {ch.name}
+                </button>
+              ))}
+              {dmChannels.length === 0 && (
+                <p
+                  style={{
+                    color: "#6c757d",
+                    fontSize: "14px",
+                    textAlign: "center",
+                    marginTop: "20px",
+                  }}
+                >
+                  No direct messages yet
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              {groupChannels.map((ch) => (
+                <button
+                  key={ch.id}
+                  onClick={() => setActiveChannel(ch.id)}
+                  style={{
+                    padding: "10px",
+                    borderRadius: "6px",
+                    border: "none",
+                    backgroundColor:
+                      ch.id === activeChannel ? "#0d6efd" : "#fff",
+                    color: ch.id === activeChannel ? "#fff" : "#212529",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                  }}
+                >
+                  👥 {ch.name}
+                </button>
+              ))}
+              {groupChannels.length === 0 && (
+                <p
+                  style={{
+                    color: "#6c757d",
+                    fontSize: "14px",
+                    textAlign: "center",
+                    marginTop: "20px",
+                  }}
+                >
+                  No groups yet
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Action Buttons */}
+        <div
+          style={{
+            padding: "10px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+          }}
+        >
+          {activeTab === "dm" ? (
+            <button
+              onClick={() => setShowDMModal(true)}
+              style={{
+                padding: "10px",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: "#6610f2",
+                color: "#fff",
+                cursor: "pointer",
+                fontWeight: "bold",
+              }}
+            >
+              💬 New Direct Message
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              style={{
+                padding: "10px",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: "#198754",
+                color: "#fff",
+                cursor: "pointer",
+                fontWeight: "bold",
+              }}
+            >
+              + Create Group
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Main Chat Panel */}
@@ -258,7 +668,7 @@ export default function ChatPage() {
         <h4>
           {activeChannel
             ? channels.find((c) => c.id === activeChannel)?.name.toUpperCase()
-            : "Select a Group"}
+            : "Select a Chat"}
         </h4>
 
         {/* Messages */}
@@ -278,7 +688,12 @@ export default function ChatPage() {
           {messages.map((m, i) => {
             const isMine = user && m.user_id === user.id;
             const profile = getProfile(m.user_id);
-            const name = profile.full_name || "";
+            const name = profile?.full_name || "";
+
+            const isImage = m.type === "image";
+            const isVideo = m.type === "video";
+            const isAudio = m.type === "audio";
+            const isFile = m.type === "file";
 
             return (
               <div
@@ -286,50 +701,198 @@ export default function ChatPage() {
                 style={{
                   display: "flex",
                   justifyContent: isMine ? "flex-end" : "flex-start",
+                  marginBottom: "8px",
                 }}
               >
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "flex-start",
-                    gap: "10px",
+                    flexDirection: "column",
+                    alignItems: isMine ? "flex-end" : "flex-start",
                     maxWidth: "70%",
                     backgroundColor: isMine ? "#0d6efd" : "#e9ecef",
                     color: isMine ? "#fff" : "#212529",
                     padding: "10px 15px",
                     borderRadius: "12px",
-                    wordWrap: "break-word",
+                    wordBreak: "break-word",
                   }}
                 >
                   {!isMine && (
+                    <strong style={{ marginBottom: "4px" }}>{name}</strong>
+                  )}
+
+                  {m.text && <div>{m.text}</div>}
+
+                  {isImage && m.file_url && (
                     <img
-                      src={profile.avatar_url || "/default-avatar.png"}
-                      alt={name}
+                      src={m.file_url}
+                      alt={m.file_name || "Image"}
                       style={{
-                        width: "40px",
-                        height: "40px",
-                        borderRadius: "50%",
-                        objectFit: "cover",
+                        width: "200px",
+                        borderRadius: "8px",
+                        marginTop: "6px",
                       }}
                     />
                   )}
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    {!isMine && name && (
-                      <div style={{ fontWeight: "bold", marginBottom: "3px" }}>
-                        {name}
-                      </div>
-                    )}
-                    <div>{m.text}</div>
-                  </div>
+
+                  {isVideo && m.file_url && (
+                    <video
+                      controls
+                      style={{
+                        width: "250px",
+                        borderRadius: "8px",
+                        marginTop: "6px",
+                      }}
+                    >
+                      <source src={m.file_url} type={m.mime_type} />
+                      Your browser does not support the video tag.
+                    </video>
+                  )}
+
+                  {isAudio && m.file_url && (
+                    <audio
+                      controls
+                      style={{
+                        marginTop: "6px",
+                        width: "100%",
+                      }}
+                    >
+                      <source src={m.file_url} type={m.mime_type} />
+                      Your browser does not support the audio element.
+                    </audio>
+                  )}
+
+                  {isFile && m.file_url && (
+                    <a
+                      href={m.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: isMine ? "#fff" : "#0d6efd",
+                        textDecoration: "underline",
+                        marginTop: "6px",
+                      }}
+                    >
+                      📎 {m.file_name || "Download file"}
+                    </a>
+                  )}
                 </div>
               </div>
             );
           })}
+
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Attached Files Preview */}
+        {attachedFiles.length > 0 && (
+          <div
+            style={{
+              marginTop: "10px",
+              padding: "10px",
+              backgroundColor: "#e7f3ff",
+              borderRadius: "6px",
+              border: "1px solid #b3d9ff",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                marginBottom: "8px",
+              }}
+            >
+              <strong style={{ fontSize: "14px" }}>
+                {attachedFiles.length} file{attachedFiles.length > 1 ? "s" : ""}{" "}
+                attached
+              </strong>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+              {attachedFiles.map((file, index) => (
+                <div
+                  key={index}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "6px 10px",
+                    backgroundColor: "#fff",
+                    borderRadius: "4px",
+                    fontSize: "13px",
+                    border: "1px solid #dee2e6",
+                  }}
+                >
+                  <span>📎</span>
+                  <span>{file.name}</span>
+                  <button
+                    onClick={() => removeFile(index)}
+                    style={{
+                      border: "none",
+                      background: "none",
+                      color: "#dc3545",
+                      cursor: "pointer",
+                      padding: "0 4px",
+                      fontSize: "16px",
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Input */}
-        <div style={{ display: "flex", marginTop: "10px", gap: "10px" }}>
+        <div
+          style={{
+            display: "flex",
+            marginTop: "10px",
+            gap: "10px",
+            alignItems: "center",
+          }}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            onChange={handleFileSelect}
+            style={{ display: "none" }}
+            id="file-input"
+          />
+          <label
+            htmlFor="file-input"
+            style={{
+              cursor: "pointer",
+              fontSize: "24px",
+              userSelect: "none",
+              position: "relative",
+            }}
+          >
+            📎
+            {attachedFiles.length > 0 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "-8px",
+                  right: "-8px",
+                  backgroundColor: "#dc3545",
+                  color: "#fff",
+                  borderRadius: "50%",
+                  width: "20px",
+                  height: "20px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "12px",
+                  fontWeight: "bold",
+                }}
+              >
+                {attachedFiles.length}
+              </span>
+            )}
+          </label>
+
           <input
             type="text"
             style={{
@@ -341,6 +904,14 @@ export default function ChatPage() {
             placeholder="Type a message..."
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onKeyPress={(e) => {
+              if (
+                e.key === "Enter" &&
+                (text.trim() || attachedFiles.length > 0)
+              ) {
+                sendMessage();
+              }
+            }}
             disabled={!user || !activeChannel}
           />
           <button
@@ -353,12 +924,88 @@ export default function ChatPage() {
               cursor: "pointer",
             }}
             onClick={sendMessage}
-            disabled={!user || !activeChannel || !text.trim()}
+            disabled={
+              !user ||
+              !activeChannel ||
+              (!text.trim() && attachedFiles.length === 0)
+            }
           >
             Send
           </button>
         </div>
       </div>
+
+      {/* Create DM Modal */}
+      {showDMModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "#fff",
+              padding: "20px",
+              borderRadius: "8px",
+              width: "400px",
+              maxHeight: "80%",
+              overflowY: "auto",
+            }}
+          >
+            <h5>Start Direct Message</h5>
+            <p style={{ color: "#6c757d", fontSize: "14px" }}>
+              Select a user to start chatting
+            </p>
+            {allUsers
+              .filter((u) => u.id !== user?.id)
+              .map((u) => (
+                <div
+                  key={u.id}
+                  onClick={() => createDM(u.id)}
+                  style={{
+                    padding: "10px",
+                    marginBottom: "8px",
+                    borderRadius: "6px",
+                    backgroundColor: "#f8f9fa",
+                    cursor: "pointer",
+                    border: "1px solid #dee2e6",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = "#e9ecef";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "#f8f9fa";
+                  }}
+                >
+                  {u.full_name || u.id}
+                </div>
+              ))}
+            <div style={{ marginTop: "15px", textAlign: "right" }}>
+              <button
+                onClick={() => setShowDMModal(false)}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  border: "1px solid #ced4da",
+                  backgroundColor: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Group Modal */}
       {showCreateModal && (
@@ -373,6 +1020,7 @@ export default function ChatPage() {
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
+            zIndex: 1000,
           }}
         >
           <div
@@ -403,31 +1051,44 @@ export default function ChatPage() {
             {allUsers
               .filter((u) => u.id !== user?.id)
               .map((u) => (
-                <div key={u.id}>
-                  <label>
+                <div key={u.id} style={{ marginBottom: "8px" }}>
+                  <label
+                    style={{
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
                     <input
                       type="checkbox"
                       checked={selectedUsers.includes(u.id)}
                       onChange={() => toggleUserSelection(u.id)}
-                    />{" "}
+                    />
                     {u.full_name || u.id}
                   </label>
                 </div>
               ))}
             <div
               style={{
-                marginTop: "10px",
+                marginTop: "15px",
                 display: "flex",
                 justifyContent: "flex-end",
                 gap: "10px",
               }}
             >
               <button
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setSelectedUsers([]);
+                  setNewGroupName("");
+                }}
                 style={{
-                  padding: "6px 12px",
+                  padding: "8px 16px",
                   borderRadius: "6px",
                   border: "1px solid #ced4da",
+                  backgroundColor: "#fff",
+                  cursor: "pointer",
                 }}
               >
                 Cancel
@@ -435,11 +1096,14 @@ export default function ChatPage() {
               <button
                 onClick={createGroup}
                 style={{
-                  padding: "6px 12px",
+                  padding: "8px 16px",
                   borderRadius: "6px",
                   border: "none",
                   backgroundColor: "#198754",
                   color: "#fff",
+                  cursor: "pointer",
+                  opacity:
+                    !newGroupName.trim() || !selectedUsers.length ? 0.5 : 1,
                 }}
                 disabled={!newGroupName.trim() || !selectedUsers.length}
               >

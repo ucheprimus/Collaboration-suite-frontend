@@ -1,35 +1,61 @@
-// frontend/src/context/SocketProvider.tsx
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, ReactNode, useRef } from "react";
 import { io, Socket } from "socket.io-client";
+import { useSession } from "@supabase/auth-helpers-react";
 
-const SocketContext = createContext<{ socket: Socket | null }>({ socket: null });
-
-export function SocketProvider({ children }: { children: React.ReactNode }) {
-  const [socket, setSocket] = useState<Socket | null>(null);
-
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      console.warn("⚠️ No auth token found for socket connection");
-      return;
-    }
-
-    const s = io("http://localhost:4000", {
-      auth: { token },
-      transports: ["websocket", "polling"],
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    });
-
-    s.on("connect", () => console.log("✅ Socket connected:", s.id));
-    s.on("connect_error", (err) => console.error("❌ Socket connect error:", err.message));
-    s.on("disconnect", () => console.log("⚠️ Socket disconnected"));
-
-    setSocket(s);
-    return () => s.disconnect();
-  }, []);
-
-  return <SocketContext.Provider value={{ socket }}>{children}</SocketContext.Provider>;
+interface SocketContextType {
+  socket: Socket | null;
+  connected: boolean;
 }
 
-export const useSocket = () => useContext(SocketContext);
+const SocketContext = createContext<SocketContextType>({
+  socket: null,
+  connected: false,
+});
+
+export const SocketProvider = ({ children }: { children: ReactNode }) => {
+  const session = useSession();
+  const socketRef = useRef<Socket | null>(null);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    if (!socketRef.current) {
+      // create socket once
+      socketRef.current = io(import.meta.env.VITE_API_URL || "http://localhost:4000", {
+        auth: { token: session?.access_token },
+        transports: ["websocket"],
+        withCredentials: true,
+      });
+
+      const s = socketRef.current;
+
+      s.on("connect", () => {
+        console.log("🔌 Connected to Socket.IO");
+        setConnected(true);
+      });
+
+      s.on("disconnect", () => {
+        console.log("❌ Disconnected from Socket.IO");
+        setConnected(false);
+      });
+    } else if (session?.access_token) {
+      // update token on the existing socket
+      socketRef.current.auth = { token: session.access_token };
+      socketRef.current.connect();
+    }
+
+    return () => {
+      // only disconnect when component unmounts
+      return () => {
+        socketRef.current?.disconnect();
+      };
+    };
+  }, [session?.access_token]);
+
+  return (
+    <SocketContext.Provider value={{ socket: socketRef.current, connected }}>
+      {children}
+    </SocketContext.Provider>
+  );
+};
+
+export const useSocketContext = () => useContext(SocketContext);
