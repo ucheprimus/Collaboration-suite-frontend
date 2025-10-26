@@ -24,7 +24,7 @@ import { supabase } from "../lib/supabaseClient";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-const SOCKET_URL = "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
+const SOCKET_URL = "https://collaboration-suite-backend.onrender.com";
 const SYNC_THROTTLE = 100; // Reduced from 300 for better responsiveness
 
 // ADD THESE LINES:
@@ -106,7 +106,7 @@ export default function WhiteboardPage() {
   const canvasSyncEnabledRef = useRef(false);
   const hasInitialLoadRef = useRef(false);  // ADD THIS LINE
 
-  const API_URL = import.meta.env.VITE_API_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
+  const API_URL = import.meta.env.VITE_API_URL || "https://collaboration-suite-backend.onrender.com";
 
   // Fetch user
   useEffect(() => {
@@ -128,7 +128,7 @@ export default function WhiteboardPage() {
       const res = await fetch(`${SOCKET_URL}/api/whiteboards`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
+      const data = await response.json();
       setWhiteboards(data || []);
     } catch (err) {
       console.error("Error fetching whiteboards:", err);
@@ -160,7 +160,7 @@ export default function WhiteboardPage() {
         body: JSON.stringify({ title: newWhiteboardTitle }),
       });
 
-      const data = await res.json();
+      const data = await response.json();
       setWhiteboards((prev) => [data, ...prev]);
       setShowCreateModal(false);
       setNewWhiteboardTitle("");
@@ -195,7 +195,7 @@ export default function WhiteboardPage() {
         body: JSON.stringify({ title: renameTitle }),
       });
 
-      if (res.ok) {
+      if (response.ok) {
         setWhiteboards((prev) =>
           prev.map((wb) =>
             wb.id === renameId ? { ...wb, title: renameTitle } : wb
@@ -226,7 +226,7 @@ export default function WhiteboardPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (res.ok) {
+      if (response.ok) {
         setWhiteboards((prev) => prev.filter((wb) => wb.id !== id));
         if (currentWhiteboard?.id === id) {
           setCurrentWhiteboard(null);
@@ -672,7 +672,7 @@ socketRef.current.on("whiteboard:load", (json: any) => {
         `${SOCKET_URL}/api/whiteboards/${currentWhiteboard.id}/collaborators`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      const data = await res.json();
+      const data = await response.json();
       setCollaborators(data || []);
     } catch (err) {
       console.error("Error fetching collaborators:", err);
@@ -700,8 +700,8 @@ socketRef.current.on("whiteboard:load", (json: any) => {
         }
       );
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
 
       toast.success("Collaborator added!");
       setNewCollabEmail("");

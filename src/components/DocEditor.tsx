@@ -17,7 +17,7 @@ interface DocEditorProps {
   docId: string;
 }
 
-const SERVER_URL = "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
+const SERVER_URL = "https://collaboration-suite-backend.onrender.com";
 
 export default function DocEditor({ docId }: DocEditorProps) {
   const [user, setUser] = useState<any>(null);

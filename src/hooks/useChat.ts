@@ -5,7 +5,7 @@ import { supabase } from "../lib/supabaseClient";
 import { io } from "socket.io-client";
 import type { Socket } from "../types/socket.types";
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "https://collaboration-suite-backend.onrender.com";
 
 export interface Message {
   id: string;

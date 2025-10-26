@@ -1,7 +1,7 @@
 // API Configuration
-export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
-export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:4000";
-export const SERVER_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+export const API_URL = import.meta.env.VITE_API_URL || "https://collaboration-suite-backend.onrender.com";
+export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "https://collaboration-suite-backend.onrender.com";
+export const SERVER_URL = import.meta.env.VITE_API_URL || "https://collaboration-suite-backend.onrender.com";
 
 console.log('🔧 API Configuration:', {
   API_URL,

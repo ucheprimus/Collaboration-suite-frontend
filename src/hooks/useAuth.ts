@@ -15,7 +15,7 @@ export function useAuth() {
   const [user, setUser] = useState<string | null>(null); // store user id
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-const API_URL = import.meta.env.VITE_API_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
+const API_URL = import.meta.env.VITE_API_URL || "https://collaboration-suite-backend.onrender.com";
 
   useEffect(() => {
     const token = localStorage.getItem("token");

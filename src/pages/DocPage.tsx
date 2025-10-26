@@ -46,7 +46,7 @@ export default function DocPage() {
   const [newCollabPermission, setNewCollabPermission] = useState<"viewer" | "editor">("editor");
 
 
-  const API_URL = import.meta.env.VITE_API_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
+  const API_URL = import.meta.env.VITE_API_URL || "https://collaboration-suite-backend.onrender.com";
   
 
   // FIXED: Get fresh token function
@@ -134,12 +134,12 @@ export default function DocPage() {
         },
       });
 
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `HTTP ${res.status}`);
       }
 
-      const data = await res.json();
+      const data = await response.json();
       console.log("✅ Fetched", data.length, "documents");
       setDocuments(data || []);
     } catch (err: any) {
@@ -178,12 +178,12 @@ export default function DocPage() {
         }),
       });
 
-      if (!res.ok) {
-        const errorData = await res.json();
+      if (!response.ok) {
+        const errorData = await response.json();
         throw new Error(errorData.error || "Failed to create doc");
       }
 
-      const data = await res.json();
+      const data = await response.json();
       setDocuments((prev) => [data, ...prev]);
       setDocId(data.id);
       toast.success("Document created ✅");
@@ -217,12 +217,12 @@ const res = await fetch(`${API_URL}/docs/${renameId}`, {
   body: JSON.stringify({ title: renameTitle }),
 });
 
-      if (!res.ok) {
-        const errorData = await res.json();
+      if (!response.ok) {
+        const errorData = await response.json();
         throw new Error(errorData.error || "Rename failed");
       }
 
-      const data = await res.json();
+      const data = await response.json();
       setDocuments((prev) =>
         prev.map((doc) =>
           doc.id === renameId ? { ...doc, title: data.title } : doc
@@ -252,8 +252,8 @@ const res = await fetch(`${API_URL}/docs/${id}`, {
   method: "DELETE",
   headers: { Authorization: `Bearer ${token}` },
 });
-      if (!res.ok) {
-        const errorData = await res.json();
+      if (!response.ok) {
+        const errorData = await response.json();
         throw new Error(errorData.error || "Failed to delete");
       }
 
@@ -284,12 +284,12 @@ const res = await fetch(`${API_URL}/docs/${id}/visibility`, {
   body: JSON.stringify({ is_public: !current }),
 });
 
-      if (!res.ok) {
-        const errorData = await res.json();
+      if (!response.ok) {
+        const errorData = await response.json();
         throw new Error(errorData.error || "Failed to update visibility");
       }
 
-      const data = await res.json();
+      const data = await response.json();
       setDocuments((prev) =>
         prev.map((doc) =>
           doc.id === id ? { ...doc, is_public: data.is_public } : doc
@@ -318,12 +318,12 @@ const res = await fetch(`${API_URL}/api/collaborators/${docId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (!res.ok) {
-        const errorData = await res.json();
+      if (!response.ok) {
+        const errorData = await response.json();
         throw new Error(errorData.error || `HTTP ${res.status}`);
       }
 
-      const data = await res.json();
+      const data = await response.json();
       setCollaborators(data);
     } catch (err: any) {
       console.error("❌ Error fetching collaborators:", err);
@@ -362,8 +362,8 @@ const res = await fetch(`${API_URL}/api/collaborators/${docId}`, {
         }),
       });
 
-      if (!res.ok) {
-        const errorData = await res.json();
+      if (!response.ok) {
+        const errorData = await response.json();
         throw new Error(errorData.error || "Failed to add collaborator");
       }
 
@@ -395,8 +395,8 @@ const res = await fetch(`${API_URL}/api/collaborators/${docId}`, {
         body: JSON.stringify({ permission: newPermission }),
       });
 
-      if (!res.ok) {
-        const errorData = await res.json();
+      if (!response.ok) {
+        const errorData = await response.json();
         throw new Error(errorData.error || "Failed to update permission");
       }
 
@@ -426,8 +426,8 @@ const res = await fetch(`${API_URL}/api/collaborators/${docId}`, {
         }
       );
 
-      if (!res.ok) {
-        const errorData = await res.json();
+      if (!response.ok) {
+        const errorData = await response.json();
         throw new Error(errorData.error || "Failed to remove collaborator");
       }
 
