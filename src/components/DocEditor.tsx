@@ -113,12 +113,21 @@ export default function DocEditor({ docId }: DocEditorProps) {
       }
     });
 
-    const socket = io(`${SERVER_URL}/yjs`, {
-      auth: { token: user.token },
-      query: { docId },
-      transports: ["websocket", "polling"],
-    });
-
+// Around line 117, change the socket connection to:
+const socket = io(`${SERVER_URL}/yjs`, {
+  auth: { 
+    token: user.token,
+    docId: docId 
+  },
+  query: { 
+    token: user.token,
+    docId: docId 
+  },
+  extraHeaders: {
+    'Authorization': `Bearer ${user.token}`
+  },
+  transports: ["websocket", "polling"],
+});
     socketRef.current = socket;
 
     socket.on("connect", () => {
