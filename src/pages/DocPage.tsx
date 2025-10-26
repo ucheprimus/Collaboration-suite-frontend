@@ -46,7 +46,8 @@ export default function DocPage() {
   const [newCollabPermission, setNewCollabPermission] = useState<"viewer" | "editor">("editor");
 
 
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+  const API_URL = import.meta.env.VITE_API_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
+  
 
   // FIXED: Get fresh token function
   const getToken = async () => {
@@ -312,7 +313,8 @@ const res = await fetch(`${API_URL}/docs/${id}/visibility`, {
         return;
       }
 
-      const res = await fetch(`http://localhost:4000/api/collaborators/${docId}`, {
+        // ✅ CORRECT:
+const res = await fetch(`${API_URL}/api/collaborators/${docId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -347,7 +349,8 @@ const res = await fetch(`${API_URL}/docs/${id}/visibility`, {
         return;
       }
 
-      const res = await fetch(`http://localhost:4000/api/collaborators/${docId}`, {
+       // ✅ CORRECT:
+const res = await fetch(`${API_URL}/api/collaborators/${docId}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -381,7 +384,9 @@ const res = await fetch(`${API_URL}/docs/${id}/visibility`, {
         return;
       }
 
-      const res = await fetch(`http://localhost:4000/api/collaborators/${docId}/${collabId}`, {
+      const res = await
+        fetch(`${API_URL}/api/collaborators/${docId}/${collabId}`, { 
+
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -413,8 +418,8 @@ const res = await fetch(`${API_URL}/docs/${id}/visibility`, {
         return;
       }
 
-      const res = await fetch(
-        `http://localhost:4000/api/collaborators/${docId}/${collabId}`,
+      const res = await 
+      fetch(`${API_URL}/api/collaborators/${docId}/${collabId}`, 
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },

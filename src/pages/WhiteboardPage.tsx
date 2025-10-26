@@ -24,7 +24,7 @@ import { supabase } from "../lib/supabaseClient";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-const SOCKET_URL = "http://localhost:4000";
+const SOCKET_URL = "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
 const SYNC_THROTTLE = 100; // Reduced from 300 for better responsiveness
 
 // ADD THESE LINES:
@@ -106,6 +106,7 @@ export default function WhiteboardPage() {
   const canvasSyncEnabledRef = useRef(false);
   const hasInitialLoadRef = useRef(false);  // ADD THIS LINE
 
+  const API_URL = import.meta.env.VITE_API_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
 
   // Fetch user
   useEffect(() => {

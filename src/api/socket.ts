@@ -2,7 +2,7 @@ import { io } from "../lib/socket";
 import type { Socket } from "../types/socket.types";
 import { supabase } from "../lib/supabaseClient";
 
-const SERVER_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+const SERVER_URL = import.meta.env.VITE_API_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
 
 let socket: Socket | null = null;
 

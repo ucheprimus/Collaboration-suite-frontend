@@ -10,10 +10,12 @@ interface Profile {
   avatar_url?: string;
 }
 
+
 export function useAuth() {
   const [user, setUser] = useState<string | null>(null); // store user id
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+const API_URL = import.meta.env.VITE_API_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -23,7 +25,7 @@ export function useAuth() {
     }
 
     axios
-      .get("http://localhost:4000/profile/me", {
+      .get(`${API_URL}/profile/me`, {  // ✅ Fixed
         headers: { Authorization: `Bearer ${token}` },
       })
       .then((res) => {

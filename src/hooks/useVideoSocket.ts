@@ -3,7 +3,7 @@ import { Socket } from "socket.io-client";
 import { getSocket } from "../api/socket";
 import { supabase } from "../lib/supabaseClient";
 
-const serverUrl = import.meta.env.VITE_SOCKET_URL || "http://localhost:4000";
+const serverUrl = import.meta.env.VITE_SOCKET_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
 
 let socket: Socket = getSocket();
 

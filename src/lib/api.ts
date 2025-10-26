@@ -1,12 +1,16 @@
 // API Configuration
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
-export const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:4000';
+export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:4000";
+export const SERVER_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
 console.log('🔧 API Configuration:', {
   API_URL,
   SOCKET_URL,
   SERVER_URL,
+  ENV_CHECK: {
+    VITE_API_URL: import.meta.env.VITE_API_URL,
+    VITE_SOCKET_URL: import.meta.env.VITE_SOCKET_URL,
+  }
 });
 
 // Helper for API calls

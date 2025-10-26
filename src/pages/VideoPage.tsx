@@ -35,7 +35,7 @@ import { useSession } from "@supabase/auth-helpers-react";
 import { supabase } from "../lib/supabaseClient";
 import type { Inserts } from "../lib/supabaseClient";
 
-const SERVER_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:4000";
+const SERVER_URL = import.meta.env.VITE_SOCKET_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
 
 interface Participant {
   id: string;

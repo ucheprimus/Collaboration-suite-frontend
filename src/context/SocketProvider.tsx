@@ -26,7 +26,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
 
   useEffect(() => {
     // Use VITE_SOCKET_URL from environment, fallback to port 4000 (your backend port)
-    const socketUrl = import.meta.env.VITE_SOCKET_URL || "http://localhost:4000";
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || "${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}";
     
     console.log("🔌 Initializing Socket.IO connection to:", socketUrl);
     

@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabaseClient";
 import { io } from "socket.io-client";
 
 // Socket.io connection
-const socket = io("http://localhost:4000", { transports: ["websocket"] });
+const socket = io("${import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || "http://localhost:4000"}", { transports: ["websocket"] });
 
 interface Profile {
   id: string;
