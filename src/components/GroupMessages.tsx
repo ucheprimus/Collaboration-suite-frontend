@@ -1,7 +1,8 @@
 // src/components/GroupMessages.tsx - FIXED VERSION WITH IMPROVED REPLY UI
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
-import type { Socket } from "socket.io-client";
+import type { Socket } from "../types/socket.types"; // Add this import
+import type { Tables, Inserts } from "../lib/supabaseClient"; // ✅ CORRECT
 
 interface Profile {
   id: string;
@@ -27,7 +28,7 @@ interface Message {
   type: "text" | "image" | "video" | "audio" | "file";
   created_at?: string;
   reply_to?: string;
-  reply_to_message?: Message;
+  reply_to_message?: Message | null;
 }
 
 interface Props {
@@ -60,7 +61,8 @@ export default function GroupMessages({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeChannelRef = useRef<string | null>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const messageRefs = useRef<Record<string, HTMLDivElement>>({});
 
   useEffect(() => {
@@ -356,44 +358,57 @@ export default function GroupMessages({
     );
   };
 
-  const createGroup = async () => {
-    if (!user || !selectedUsers.length || !newGroupName.trim()) return;
+const createGroup = async () => {
+  if (!user || !selectedUsers.length || !newGroupName.trim()) return;
 
-    try {
-      const { data: newChannel, error: chErr } = await supabase
-        .from("channels")
-        .insert([
-          { name: newGroupName.trim(), created_by: user.id, is_dm: false },
-        ])
-        .select()
-        .single();
+  try {
+    const channelPayload: Inserts<'channels'> = {
+      name: newGroupName.trim(),
+      created_by: user.id,
+      is_dm: false,
+    };
 
-      if (chErr) throw chErr;
+    const { data: newChannel, error: chErr } = await supabase
+      .from("channels")
+      .insert([channelPayload])
+      .select()
+      .single();
 
-      const members = [user.id, ...selectedUsers];
-      await supabase
-        .from("channel_members")
-        .insert(
-          members.map((uid) => ({ channel_id: newChannel.id, user_id: uid }))
-        );
-
-      setChannels((prev) => [
-        ...prev,
-        {
-          id: newChannel.id,
-          name: newChannel.name,
-          is_dm: false,
-          created_by: user.id,
-        },
-      ]);
-      setActiveChannel(newChannel.id);
-      setShowCreateModal(false);
-      setSelectedUsers([]);
-      setNewGroupName("");
-    } catch (err) {
-      console.error("Create group error:", err);
+    if (chErr || !newChannel) {
+      throw new Error(chErr?.message || "Failed to create channel");
     }
-  };
+
+    const members = [user.id, ...selectedUsers];
+    const memberInserts: Inserts<'channel_members'>[] = members.map((uid) => ({
+      channel_id: newChannel.id,
+      user_id: uid,
+    }));
+
+    const { error: membersError } = await supabase
+      .from("channel_members")
+      .insert(memberInserts);
+
+    if (membersError) {
+      console.error("Failed to add members:", membersError);
+    }
+
+    setChannels((prev) => [
+      ...prev,
+      {
+        id: newChannel.id,
+        name: newChannel.name,
+        is_dm: false,
+        created_by: user.id,
+      },
+    ]);
+    setActiveChannel(newChannel.id);
+    setShowCreateModal(false);
+    setSelectedUsers([]);
+    setNewGroupName("");
+  } catch (err) {
+    console.error("Create group error:", err);
+  }
+};
 
   const scrollToMessage = (messageId: string) => {
     const element = messageRefs.current[messageId];
@@ -583,7 +598,7 @@ export default function GroupMessages({
           {messages.map((m, i) => {
             const isMine = user && m.user_id === user.id;
             const profile = profiles[m.user_id] || {};
-            const name = profile?.full_name || "";
+            const name = (profile as Profile)?.full_name || "";
 
             return (
               <div
@@ -597,8 +612,8 @@ export default function GroupMessages({
                   marginBottom: "8px",
                   transition: "background-color 0.3s",
                 }}
-                onTouchStart={(e) => m.id && handleTouchStart(e, m.id)}
-                onTouchMove={(e) => m.id && handleTouchMove(e, m.id)}
+                onTouchStart={(e) => handleTouchStart(e, m.id || '')}
+                onTouchMove={(e) => handleTouchMove(e, m.id || '')}
                 onTouchEnd={() => handleTouchEnd(m)}
               >
                 <div
@@ -625,59 +640,77 @@ export default function GroupMessages({
                         {name}
                       </strong>
                     )}
-{/* SLACK-STYLE REPLY PREVIEW */}
-{m.reply_to_message && (
-  <div
-    onClick={() => m.reply_to && scrollToMessage(m.reply_to)}
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: "4px",
-      marginBottom: "6px",
-      paddingLeft: "6px",
-      borderLeft: `2px solid ${isMine ? "rgba(255,255,255,0.5)" : "#1264a3"}`,
-      cursor: "pointer",
-      fontSize: "12px",
-      opacity: 0.85,
-      maxWidth: "250px", // 👈 ADDED - limits width
-    }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.opacity = "1";
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.opacity = "0.85";
-    }}
-  >
-    <span style={{ fontSize: "10px", flexShrink: 0 }}>↩</span> {/* 👈 ADDED flexShrink */}
-    <span style={{ 
-      fontWeight: "700",
-      color: isMine ? "rgba(255,255,255,0.95)" : "#1264a3",
-      flexShrink: 0, // 👈 ADDED - prevents name squishing
-      whiteSpace: "nowrap", // 👈 ADDED - keeps name on one line
-    }}>
-      {profiles[m.reply_to_message.user_id]?.full_name || "User"}
-    </span>
-    <span style={{ 
-      color: isMine ? "rgba(255,255,255,0.85)" : "#616061",
-      overflow: "hidden",
-      textOverflow: "ellipsis",
-      whiteSpace: "nowrap",
-      flex: 1,
-      minWidth: 0, // 👈 ADDED - allows proper ellipsis
-    }}>
-      {m.reply_to_message.text || "📎 Attachment"}
-    </span>
-  </div>
-)}
+                    {/* SLACK-STYLE REPLY PREVIEW */}
+                    {m.reply_to_message && (
+                      <div
+                        onClick={() =>
+                          m.reply_to && scrollToMessage(m.reply_to)
+                        }
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          marginBottom: "6px",
+                          paddingLeft: "6px",
+                          borderLeft: `2px solid ${
+                            isMine ? "rgba(255,255,255,0.5)" : "#1264a3"
+                          }`,
+                          cursor: "pointer",
+                          fontSize: "12px",
+                          opacity: 0.85,
+                          maxWidth: "250px", // 👈 ADDED - limits width
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.opacity = "1";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.opacity = "0.85";
+                        }}
+                      >
+                        <span style={{ fontSize: "10px", flexShrink: 0 }}>
+                          ↩
+                        </span>{" "}
+                        {/* 👈 ADDED flexShrink */}
+                        <span
+                          style={{
+                            fontWeight: "700",
+                            color: isMine
+                              ? "rgba(255,255,255,0.95)"
+                              : "#1264a3",
+                            flexShrink: 0, // 👈 ADDED - prevents name squishing
+                            whiteSpace: "nowrap", // 👈 ADDED - keeps name on one line
+                          }}
+                        >
+                          {profiles[m.reply_to_message.user_id]?.full_name ||
+                            "User"}
+                        </span>
+                        <span
+                          style={{
+                            color: isMine
+                              ? "rgba(255,255,255,0.85)"
+                              : "#616061",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            flex: 1,
+                            minWidth: 0, // 👈 ADDED - allows proper ellipsis
+                          }}
+                        >
+                          {m.reply_to_message.text || "📎 Attachment"}
+                        </span>
+                      </div>
+                    )}
 
-{m.text && (
-  <div style={{ 
-    fontSize: "15px", 
-    lineHeight: "1.46668",
-  }}>
-    {m.text}
-  </div>
-)}
+                    {m.text && (
+                      <div
+                        style={{
+                          fontSize: "15px",
+                          lineHeight: "1.46668",
+                        }}
+                      >
+                        {m.text}
+                      </div>
+                    )}
 
                     {m.type === "image" && m.file_url && (
                       <img

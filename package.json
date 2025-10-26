@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+        "dev": "vite",
+    "build": "vite build",
+    "build:old": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -42,9 +43,9 @@
   "devDependencies": {
     "@eslint/js": "^9.36.0",
     "@types/jwt-decode": "^2.2.1",
+    "@types/node": "^24.9.1",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
-    "@types/socket.io-client": "^1.4.36",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^5.0.3",
     "autoprefixer": "^10.4.21",

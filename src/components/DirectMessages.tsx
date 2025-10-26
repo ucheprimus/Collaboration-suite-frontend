@@ -561,7 +561,7 @@ export default function DirectMessages({
           {messages.map((m, i) => {
             const isMine = user && m.user_id === user.id;
             const profile = profiles[m.user_id] || {};
-            const name = profile?.full_name || "";
+            const name = (profile as Profile)?.full_name || "";
 
             return (
               <div
@@ -603,59 +603,76 @@ export default function DirectMessages({
                         {name}
                       </strong>
                     )}
-{/* SLACK-STYLE REPLY PREVIEW */}
-{m.reply_to_message && (
-  <div
-    onClick={() => m.reply_to && scrollToMessage(m.reply_to)}
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: "4px",
-      marginBottom: "6px",
-      paddingLeft: "6px",
-      borderLeft: `2px solid ${isMine ? "rgba(255,255,255,0.5)" : "#1264a3"}`,
-      cursor: "pointer",
-      fontSize: "12px",
-      opacity: 0.85,
-      maxWidth: "250px", // 👈 FIXED WIDTH LIMIT
-    }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.opacity = "1";
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.opacity = "0.85";
-    }}
-  >
-    <span style={{ fontSize: "10px", flexShrink: 0 }}>↩</span>
-    <span style={{ 
-      fontWeight: "700",
-      color: isMine ? "rgba(255,255,255,0.95)" : "#1264a3",
-      flexShrink: 0,
-      whiteSpace: "nowrap", // 👈 PREVENTS NAME FROM WRAPPING
-    }}>
-      {profiles[m.reply_to_message.user_id]?.full_name || "User"}
-    </span>
-    <span style={{ 
-      color: isMine ? "rgba(255,255,255,0.85)" : "#616061",
-      overflow: "hidden",
-      textOverflow: "ellipsis",
-      whiteSpace: "nowrap",
-      flex: 1,
-      minWidth: 0,
-    }}>
-      {m.reply_to_message.text || "📎 Attachment"}
-    </span>
-  </div>
-)}
+                    {/* SLACK-STYLE REPLY PREVIEW */}
+                    {m.reply_to_message && (
+                      <div
+                        onClick={() =>
+                          m.reply_to && scrollToMessage(m.reply_to)
+                        }
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          marginBottom: "6px",
+                          paddingLeft: "6px",
+                          borderLeft: `2px solid ${
+                            isMine ? "rgba(255,255,255,0.5)" : "#1264a3"
+                          }`,
+                          cursor: "pointer",
+                          fontSize: "12px",
+                          opacity: 0.85,
+                          maxWidth: "250px", // 👈 FIXED WIDTH LIMIT
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.opacity = "1";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.opacity = "0.85";
+                        }}
+                      >
+                        <span style={{ fontSize: "10px", flexShrink: 0 }}>
+                          ↩
+                        </span>
+                        <span
+                          style={{
+                            fontWeight: "700",
+                            color: isMine
+                              ? "rgba(255,255,255,0.95)"
+                              : "#1264a3",
+                            flexShrink: 0,
+                            whiteSpace: "nowrap", // 👈 PREVENTS NAME FROM WRAPPING
+                          }}
+                        >
+                          {profiles[m.reply_to_message.user_id]?.full_name ||
+                            "User"}
+                        </span>
+                        <span
+                          style={{
+                            color: isMine
+                              ? "rgba(255,255,255,0.85)"
+                              : "#616061",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            flex: 1,
+                            minWidth: 0,
+                          }}
+                        >
+                          {m.reply_to_message.text || "📎 Attachment"}
+                        </span>
+                      </div>
+                    )}
 
-{m.text && (
-  <div style={{ 
-    fontSize: "15px", 
-    lineHeight: "1.46668",
-  }}>
-    {m.text}
-  </div>
-)}
+                    {m.text && (
+                      <div
+                        style={{
+                          fontSize: "15px",
+                          lineHeight: "1.46668",
+                        }}
+                      >
+                        {m.text}
+                      </div>
+                    )}
 
                     {m.type === "image" && m.file_url && (
                       <img

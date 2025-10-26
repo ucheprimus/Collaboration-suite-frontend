@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSocketContext } from "./SocketProvider";
 import { useMediaStream } from "../hooks/useMediaDevices";
+
 
 interface Peer {
   id: string;
@@ -20,6 +21,8 @@ const WebRTCContext = createContext<WebRTCContextType>({
   joinRoom: () => {},
   leaveRoom: () => {},
 });
+
+
 
 export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   const { socket } = useSocketContext();

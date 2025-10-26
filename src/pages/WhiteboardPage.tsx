@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as Fabric from "fabric";
-import { io, Socket } from "socket.io-client";
+import { io } from "socket.io-client";
+import type { Socket } from "../types/socket.types";
 import {
   MousePointer2,
   Pencil,

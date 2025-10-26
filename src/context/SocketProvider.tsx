@@ -1,61 +1,61 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode, useRef } from "react";
-import { io, Socket } from "socket.io-client";
-import { useSession } from "@supabase/auth-helpers-react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import { io } from "socket.io-client";
+import type { Socket } from "../types/socket.types";
 
 interface SocketContextType {
   socket: Socket | null;
-  connected: boolean;
 }
 
-const SocketContext = createContext<SocketContextType>({
-  socket: null,
-  connected: false,
-});
+const SocketContext = createContext<SocketContextType>({ socket: null });
 
-export const SocketProvider = ({ children }: { children: ReactNode }) => {
-  const session = useSession();
+// Export BOTH names so imports work
+export const useSocket = () => useContext(SocketContext);
+export const useSocketContext = () => useContext(SocketContext); // ADD THIS LINE
+
+interface SocketProviderProps {
+  children: React.ReactNode;
+}
+
+export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const socketRef = useRef<Socket | null>(null);
-  const [connected, setConnected] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    if (!socketRef.current) {
-      // create socket once
-      socketRef.current = io(import.meta.env.VITE_API_URL || "http://localhost:4000", {
-        auth: { token: session?.access_token },
-        transports: ["websocket"],
-        withCredentials: true,
-      });
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || "http://localhost:3001";
+    
+    const newSocket = io(socketUrl, {
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
 
-      const s = socketRef.current;
+    newSocket.on("connect", () => {
+      console.log("Socket connected");
+      setIsConnected(true);
+    });
 
-      s.on("connect", () => {
-        console.log("🔌 Connected to Socket.IO");
-        setConnected(true);
-      });
+    newSocket.on("disconnect", () => {
+      console.log("Socket disconnected");
+      setIsConnected(false);
+    });
 
-      s.on("disconnect", () => {
-        console.log("❌ Disconnected from Socket.IO");
-        setConnected(false);
-      });
-    } else if (session?.access_token) {
-      // update token on the existing socket
-      socketRef.current.auth = { token: session.access_token };
-      socketRef.current.connect();
-    }
+    newSocket.on("connect_error", (error) => {
+      console.error("Socket connection error:", error);
+    });
+
+    socketRef.current = newSocket;
 
     return () => {
-      // only disconnect when component unmounts
-      return () => {
-        socketRef.current?.disconnect();
-      };
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
     };
-  }, [session?.access_token]);
+  }, []);
 
   return (
-    <SocketContext.Provider value={{ socket: socketRef.current, connected }}>
+    <SocketContext.Provider value={{ socket: socketRef.current }}>
       {children}
     </SocketContext.Provider>
   );
 };
-
-export const useSocketContext = () => useContext(SocketContext);

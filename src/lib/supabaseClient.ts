@@ -1,6 +1,7 @@
-// src/lib/supabaseClient.ts
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../types/database.types"; // ✅ CORRECT
 
+// ... rest of your code
 // ✅ Get env vars
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -15,12 +16,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 // ✅ Hot-reload safe singleton (prevents multiple GoTrueClient instances)
 const globalForSupabase = globalThis as unknown as {
-  supabase?: ReturnType<typeof createClient>;
+  supabase?: ReturnType<typeof createClient<Database>>;
 };
 
 export const supabase =
   globalForSupabase.supabase ??
-  createClient(supabaseUrl, supabaseAnonKey, {
+  createClient<Database>(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
@@ -32,3 +33,13 @@ export const supabase =
 if (!globalForSupabase.supabase) {
   globalForSupabase.supabase = supabase;
 }
+
+// ✅ Export helper types
+export type Tables<T extends keyof Database['public']['Tables']> = 
+  Database['public']['Tables'][T]['Row'];
+  
+export type Inserts<T extends keyof Database['public']['Tables']> = 
+  Database['public']['Tables'][T]['Insert'];
+  
+export type Updates<T extends keyof Database['public']['Tables']> = 
+  Database['public']['Tables'][T]['Update'];

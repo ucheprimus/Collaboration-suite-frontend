@@ -1,7 +1,9 @@
 // src/hooks/useChat.ts
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { io, Socket } from "socket.io-client";
+
+import { io } from "socket.io-client";
+import type { Socket } from "../types/socket.types";
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:4000";
 

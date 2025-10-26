@@ -1,26 +1,43 @@
-// src/api/socket.ts
-import { io, Socket } from "socket.io-client";
-import { supabase } from "./supabaseClient";
+import { io } from "../lib/socketIO";
+import type { Socket } from "../types/socket.types";
+import { supabase } from "../lib/supabaseClient";
+
+const SERVER_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
 let socket: Socket | null = null;
 
-export const connectSocket = async () => {
-  if (socket?.connected) return socket; // reuse existing socket
+export const connectSocket = (): Socket => {
+  if (socket) return socket;
 
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-
-  socket = io(import.meta.env.VITE_SOCKET_URL || "http://localhost:4000", {
-    auth: { token },
+  socket = io(SERVER_URL, {
+    transports: ["websocket"],
+    autoConnect: false,
   });
 
-  socket.on("connect", () => console.log("✅ Connected to socket:", socket.id));
-  socket.on("disconnect", () => console.log("❌ Disconnected from socket"));
+  socket.on("connect", () => console.log("✅ Connected to socket:", socket?.id));
 
   return socket;
 };
 
-export const getSocket = () => {
-  if (!socket) throw new Error("Socket not initialized. Call connectSocket() first.");
+export const getSocket = (): Socket => {
+  if (!socket) {
+    socket = connectSocket();
+  }
+  return socket;
+};
+
+export const initSocket = async () => {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+
+  if (!socket) {
+    socket = connectSocket();
+  }
+
+  if (token) {
+    (socket as any).auth = { token };
+  }
+
+  socket.connect();
   return socket;
 };
