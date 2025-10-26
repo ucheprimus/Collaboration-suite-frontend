@@ -128,7 +128,7 @@ export default function WhiteboardPage() {
       const res = await fetch(`${SOCKET_URL}/api/whiteboards`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await response.json();
+      const data = await res.json();
       setWhiteboards(data || []);
     } catch (err) {
       console.error("Error fetching whiteboards:", err);
@@ -160,7 +160,7 @@ export default function WhiteboardPage() {
         body: JSON.stringify({ title: newWhiteboardTitle }),
       });
 
-      const data = await response.json();
+      const data = await res.json();
       setWhiteboards((prev) => [data, ...prev]);
       setShowCreateModal(false);
       setNewWhiteboardTitle("");
@@ -195,7 +195,7 @@ export default function WhiteboardPage() {
         body: JSON.stringify({ title: renameTitle }),
       });
 
-      if (response.ok) {
+      if (res.ok) {
         setWhiteboards((prev) =>
           prev.map((wb) =>
             wb.id === renameId ? { ...wb, title: renameTitle } : wb
@@ -226,7 +226,7 @@ export default function WhiteboardPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (response.ok) {
+      if (res.ok) {
         setWhiteboards((prev) => prev.filter((wb) => wb.id !== id));
         if (currentWhiteboard?.id === id) {
           setCurrentWhiteboard(null);
@@ -672,7 +672,7 @@ socketRef.current.on("whiteboard:load", (json: any) => {
         `${SOCKET_URL}/api/whiteboards/${currentWhiteboard.id}/collaborators`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      const data = await response.json();
+      const data = await res.json();
       setCollaborators(data || []);
     } catch (err) {
       console.error("Error fetching collaborators:", err);
@@ -700,8 +700,8 @@ socketRef.current.on("whiteboard:load", (json: any) => {
         }
       );
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
 
       toast.success("Collaborator added!");
       setNewCollabEmail("");
