@@ -1,6 +1,7 @@
 // src/pages/Dashboard.tsx
 import { useEffect, useState } from "react";
 import { Link, Outlet, useNavigate, useLocation } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient"; // ✅ REAL SUPABASE
 import { 
   MessageSquare, 
   Video, 
@@ -18,17 +19,6 @@ interface UserData {
   role?: string;
 }
 
-// Mock supabase for demo
-const supabase = {
-  auth: {
-    getSession: async () => ({
-      data: { session: { user: { email: "user@example.com", user_metadata: { role: "member" } } } },
-      error: null
-    }),
-    signOut: async () => {}
-  }
-};
-
 export default function Dashboard() {
   const [user, setUser] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,31 +28,36 @@ export default function Dashboard() {
 
   useEffect(() => {
     const restoreSession = async () => {
+      console.log("🟡 Checking Supabase session...");
+
       try {
         const { data, error } = await supabase.auth.getSession();
+        console.log("🔍 Supabase session result:", { data, error });
 
         if (error) {
-          console.error("Error fetching session:", error);
+          console.error("❌ Error fetching session:", error);
           return;
         }
 
         const session = data?.session;
         if (!session) {
-          // navigate("/login", { replace: true });
-          // For demo, set a mock user
-          setUser({ email: "user@example.com", role: "member" });
+          console.warn("⚠️ No session found. Redirecting to /login...");
+          navigate("/login", { replace: true });
           return;
         }
 
         const currentUser = session.user;
+        console.log("👤 Logged-in user:", currentUser);
+
         setUser({
           email: currentUser.email ?? "No email",
           role: (currentUser.user_metadata?.role as string) || "member",
         });
       } catch (err) {
-        console.error("Unexpected error in restoreSession:", err);
+        console.error("🔥 Unexpected error in restoreSession:", err);
       } finally {
         setLoading(false);
+        console.log("✅ Finished checking session");
       }
     };
 
@@ -79,7 +74,7 @@ export default function Dashboard() {
       await supabase.auth.signOut();
       navigate("/login", { replace: true });
     } catch (err) {
-      console.error("Error during logout:", err);
+      console.error("❌ Error during logout:", err);
     }
   };
 
@@ -108,6 +103,7 @@ export default function Dashboard() {
   }
 
   if (!user) {
+    navigate("/login", { replace: true });
     return null;
   }
 

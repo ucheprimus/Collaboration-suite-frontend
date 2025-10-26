@@ -3,13 +3,17 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color: #212529; /* dark text */
-  background-color: #f8f9fa; /* light background */
+  color: #212529;
+  background-color: #f8f9fa;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
