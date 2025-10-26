@@ -6,15 +6,18 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor': ['react', 'react-dom', 'react-router-dom'],
-          'supabase': ['@supabase/supabase-js'],
-          'socket': ['socket.io-client'],
-          'editor': ['@tiptap/react', '@tiptap/starter-kit'],
-          'ui': ['react-bootstrap', 'bootstrap']
-        }
-      }
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react')) return 'vendor'
+            if (id.includes('@supabase')) return 'supabase'
+            if (id.includes('socket.io-client')) return 'socket'
+            if (id.includes('@tiptap')) return 'editor'
+            if (id.includes('react-bootstrap') || id.includes('bootstrap')) return 'ui'
+            return 'vendor' // default fallback chunk
+          }
+        },
+      },
     },
-    chunkSizeWarningLimit: 1000
-  }
+    chunkSizeWarningLimit: 1000,
+  },
 })
