@@ -45,6 +45,9 @@ export default function DocPage() {
   const [newCollabEmail, setNewCollabEmail] = useState("");
   const [newCollabPermission, setNewCollabPermission] = useState<"viewer" | "editor">("editor");
 
+
+  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+
   // FIXED: Get fresh token function
   const getToken = async () => {
     try {
@@ -122,7 +125,8 @@ export default function DocPage() {
 
       console.log("📡 Fetching documents...");
 
-      const res = await fetch(`http://localhost:4000/docs/user`, {
+      const response = await fetch(`${API_URL}/docs/user`, {
+
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -158,7 +162,8 @@ export default function DocPage() {
         return;
       }
 
-      const res = await fetch("http://localhost:4000/docs", {
+      const response = await fetch(`${API_URL}/docs/user`, {
+
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -202,14 +207,14 @@ export default function DocPage() {
         return;
       }
 
-      const res = await fetch(`http://localhost:4000/docs/${renameId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ title: renameTitle }),
-      });
+const res = await fetch(`${API_URL}/docs/${renameId}`, {
+  method: "PUT",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  },
+  body: JSON.stringify({ title: renameTitle }),
+});
 
       if (!res.ok) {
         const errorData = await res.json();
@@ -241,11 +246,11 @@ export default function DocPage() {
         return;
       }
 
-      const res = await fetch(`http://localhost:4000/docs/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
+// ✅ CORRECT:
+const res = await fetch(`${API_URL}/docs/${id}`, {
+  method: "DELETE",
+  headers: { Authorization: `Bearer ${token}` },
+});
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.error || "Failed to delete");
@@ -268,14 +273,15 @@ export default function DocPage() {
         return;
       }
 
-      const res = await fetch(`http://localhost:4000/docs/${id}/visibility`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ is_public: !current }),
-      });
+      // ✅ CORRECT:
+const res = await fetch(`${API_URL}/docs/${id}/visibility`, {
+  method: "PUT",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  },
+  body: JSON.stringify({ is_public: !current }),
+});
 
       if (!res.ok) {
         const errorData = await res.json();

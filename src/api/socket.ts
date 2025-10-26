@@ -1,4 +1,4 @@
-import { io } from "../lib/socketIO";
+import { io } from "../lib/socket";
 import type { Socket } from "../types/socket.types";
 import { supabase } from "../lib/supabaseClient";
 

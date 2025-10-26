@@ -12,6 +12,9 @@ interface Profile {
   online?: boolean;
 }
 
+// ✅ FIX: Use environment variable for socket URL
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:4000";
+
 export default function ChatPage() {
   const [user, setUser] = useState<any>(null);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
@@ -70,7 +73,10 @@ export default function ChatPage() {
         return;
       }
 
-      const socket = io("http://localhost:4000", {
+      console.log("🔌 Connecting to socket at:", SOCKET_URL);
+
+      // ✅ FIX: Use SOCKET_URL variable instead of hardcoded localhost
+      const socket = io(SOCKET_URL, {
         transports: ["websocket"],
         auth: { token },
         withCredentials: true,

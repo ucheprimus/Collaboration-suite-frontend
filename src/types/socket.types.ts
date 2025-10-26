@@ -1,4 +1,4 @@
-import type { Socket as SocketIOSocket } from '../lib/socketIO';
+import type { Socket as SocketIOSocket } from '../lib/socket';
 
 export type Socket = SocketIOSocket;
 
