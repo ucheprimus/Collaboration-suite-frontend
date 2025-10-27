@@ -115,14 +115,11 @@ export default function DocEditor({ docId }: DocEditorProps) {
 
 // Around line 117, change the socket connection to:
 const socket = io(`${SERVER_URL}/yjs`, {
-  auth: { 
+  query: { 
     token: user.token,
     docId: docId 
   },
-  transports: ["websocket", "polling"],
-  reconnection: true,
-  reconnectionDelay: 1000,
-  reconnectionAttempts: 5
+  transports: ["websocket", "polling"]
 });
     socketRef.current = socket;
 
