@@ -685,6 +685,16 @@ export default function VideoPage() {
 
       await startLocalStream();
 
+      // Add validation
+      if (!localStreamRef.current) {
+        throw new Error("Failed to initialize media stream");
+      }
+
+      console.log("✅ Local stream ready with tracks:", {
+        video: localStreamRef.current.getVideoTracks().length,
+        audio: localStreamRef.current.getAudioTracks().length,
+      });
+
       const participantPayload: Inserts<"video_participants"> = {
         room_id: room.id,
         user_id: session.user.id,
@@ -696,18 +706,38 @@ export default function VideoPage() {
         .from("video_participants")
         .upsert([participantPayload], { onConflict: "room_id,user_id" });
 
-      // WITH THIS:
-      const { data: participantsData } = await supabase
-        .from("video_participants")
-        .select(
-          `
-    user_id,
-    role,
-    profiles!video_participants_user_id_fkey(full_name)
-  `
-        )
-        .eq("room_id", room.id)
-        .is("left_at", null);
+      // REPLACE WITH:
+      const { data: participantsData, error: participantsError } =
+        await supabase
+          .from("video_participants")
+          .select("user_id, role")
+          .eq("room_id", room.id)
+          .is("left_at", null);
+
+      if (participantsError)
+        console.error("Participants error:", participantsError);
+
+      if (participantsData) {
+        const enriched = await Promise.all(
+          participantsData.map(async (p: any) => {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("full_name")
+              .eq("id", p.user_id)
+              .single();
+
+            return {
+              id: p.user_id,
+              user_id: p.user_id,
+              user_name: profile?.full_name || "Guest",
+              role: p.role,
+              isSelf: p.user_id === session.user.id,
+              socketId: p.user_id,
+            };
+          })
+        );
+        setParticipants(enriched);
+      }
 
       if (participantsData) {
         setParticipants(
@@ -722,19 +752,35 @@ export default function VideoPage() {
         );
       }
 
-      const { data: chatData } = await supabase
+      // REPLACE WITH:
+      const { data: chatData, error: chatError } = await supabase
         .from("video_messages")
-        .select(
-          `
-    id,
-    user_id,
-    message,
-    created_at,
-    profiles!video_messages_user_id_fkey(full_name)
-  `
-        )
+        .select("id, user_id, message, created_at")
         .eq("room_id", room.id)
         .order("created_at", { ascending: true });
+
+      if (chatError) console.error("Chat error:", chatError);
+
+      if (chatData) {
+        const enriched = await Promise.all(
+          chatData.map(async (m: any) => {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("full_name")
+              .eq("id", m.user_id)
+              .single();
+
+            return {
+              id: m.id,
+              user_id: m.user_id,
+              user_name: profile?.full_name || "Unknown",
+              message: m.message,
+              created_at: m.created_at,
+            };
+          })
+        );
+        setMessages(enriched);
+      }
 
       if (chatData) {
         setMessages(
