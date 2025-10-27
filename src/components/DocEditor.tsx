@@ -1,4 +1,4 @@
-// src/components/DocEditor.tsx - FIXED: Content loads immediately
+// src/components/DocEditor.tsx - FIXED: Proper cleanup and connection order
 import React, { useEffect, useState, useRef } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -32,6 +32,7 @@ export default function DocEditor({ docId }: DocEditorProps) {
   const socketRef = useRef<Socket | null>(null);
   const awarenessRef = useRef<awarenessProtocol.Awareness | null>(null);
   const editorRef = useRef<any>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   // Fetch user
   useEffect(() => {
@@ -80,21 +81,14 @@ export default function DocEditor({ docId }: DocEditorProps) {
   useEffect(() => {
     if (!user || !docId) return;
 
-    console.log("🚀 Setting up Y.js for:", docId);
+    // CRITICAL: Run cleanup first to ensure clean state
+    if (cleanupRef.current) {
+      console.log("🧹 Running previous cleanup first...");
+      cleanupRef.current();
+      cleanupRef.current = null;
+    }
 
-    // Cleanup old connections
-    if (socketRef.current) {
-      socketRef.current.disconnect();
-      socketRef.current = null;
-    }
-    if (awarenessRef.current) {
-      awarenessRef.current.destroy();
-      awarenessRef.current = null;
-    }
-    if (ydocRef.current) {
-      ydocRef.current.destroy();
-      ydocRef.current = null;
-    }
+    console.log("🚀 Setting up Y.js for:", docId);
 
     setReady(false);
     setError(null);
@@ -104,11 +98,9 @@ export default function DocEditor({ docId }: DocEditorProps) {
     const ydoc = new Y.Doc();
     ydocRef.current = ydoc;
 
-    // Create awareness
     const awareness = new awarenessProtocol.Awareness(ydoc);
     awarenessRef.current = awareness;
 
-    // Set local awareness state
     awareness.setLocalState({
       user: {
         name: user.email,
@@ -116,6 +108,7 @@ export default function DocEditor({ docId }: DocEditorProps) {
       }
     });
 
+    // Create socket connection
     const socket = io(`${SERVER_URL}/yjs`, {
       auth: { 
         token: user.token
@@ -123,22 +116,28 @@ export default function DocEditor({ docId }: DocEditorProps) {
       query: { 
         docId: docId 
       },
-      transports: ["websocket", "polling"]
+      transports: ["websocket", "polling"],
+      reconnection: false // Prevent auto-reconnect to avoid conflicts
     });
     socketRef.current = socket;
 
+    let isConnected = false;
+
     socket.on("connect", () => {
-      console.log("✅ Socket connected");
+      console.log("✅ Socket connected:", socket.id);
+      isConnected = true;
       setReady(true);
     });
 
     socket.on("connect_error", (err) => {
       console.error("❌ Connection error:", err.message);
       setError(`Connection failed: ${err.message}`);
+      setReady(false);
     });
 
     socket.on("disconnect", (reason) => {
       console.log("❌ Disconnected:", reason);
+      isConnected = false;
       setReady(false);
     });
 
@@ -147,14 +146,12 @@ export default function DocEditor({ docId }: DocEditorProps) {
       setError(err.message || "Connection error");
     });
 
-    // Listen for permission
     socket.on("permission", ({ permission: perm }: { permission: string }) => {
       console.log("🔐 Permission received:", perm);
       setPermission(perm);
       setSyncing(false);
     });
 
-    // Handle sync messages
     socket.on("sync", (data: ArrayBuffer | Uint8Array) => {
       try {
         const uint8Data = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
@@ -166,13 +163,11 @@ export default function DocEditor({ docId }: DocEditorProps) {
         const messageType = decoding.readVarUint(decoder);
 
         if (messageType === 0) {
-          // Sync message
           const syncType = decoding.readVarUint(decoder);
           
           console.log("  → Sync type:", syncType === 0 ? "Step1" : syncType === 1 ? "Step2" : "Update");
           
           if (syncType === syncProtocol.messageYjsSyncStep1) {
-            // Server wants our state
             const encoder = encoding.createEncoder();
             encoding.writeVarUint(encoder, 0);
             encoding.writeVarUint(encoder, syncProtocol.messageYjsSyncStep2);
@@ -180,34 +175,31 @@ export default function DocEditor({ docId }: DocEditorProps) {
             socket.emit("sync", encoding.toUint8Array(encoder));
             console.log("  📤 Sent our state");
           } else if (syncType === syncProtocol.messageYjsSyncStep2) {
-            // Server sending us the full state
             const update = decoding.readVarUint8Array(decoder);
             console.log("  → Applying full state:", update.length, "bytes");
             
             Y.applyUpdate(ydoc, update);
             
-            // Check what was loaded
             const fragment = ydoc.getXmlFragment("default");
             console.log("  ✅ Document loaded! Fragment has", fragment.length, "nodes");
             
-            // CRITICAL: Mark content as loaded and trigger editor refresh
             setContentLoaded(true);
             
-            // Force editor update if editor exists
+            // Force editor refresh
             if (editorRef.current) {
               console.log("🔄 Forcing editor content refresh");
               setTimeout(() => {
-                editorRef.current?.commands.setContent(editorRef.current.getJSON());
+                if (editorRef.current) {
+                  editorRef.current.commands.setContent(editorRef.current.getJSON());
+                }
               }, 50);
             }
           } else if (syncType === syncProtocol.messageYjsUpdate) {
-            // Incremental update
             const update = decoding.readVarUint8Array(decoder);
             Y.applyUpdate(ydoc, update);
             console.log("✅ Update applied");
           }
         } else if (messageType === 1) {
-          // Awareness message
           try {
             awarenessProtocol.applyAwarenessUpdate(
               awareness,
@@ -223,9 +215,8 @@ export default function DocEditor({ docId }: DocEditorProps) {
       }
     });
 
-    // Send document updates
     const updateHandler = (update: Uint8Array, origin: any) => {
-      if (origin !== socket) {
+      if (origin !== socket && isConnected) {
         const encoder = encoding.createEncoder();
         encoding.writeVarUint(encoder, 0);
         encoding.writeVarUint(encoder, syncProtocol.messageYjsUpdate);
@@ -236,8 +227,8 @@ export default function DocEditor({ docId }: DocEditorProps) {
     };
     ydoc.on("update", updateHandler);
 
-    // Send awareness updates
     const awarenessUpdateHandler = ({ added, updated, removed }: any) => {
+      if (!isConnected) return;
       const changedClients = added.concat(updated).concat(removed);
       if (changedClients.length > 0) {
         const encoder = encoding.createEncoder();
@@ -253,20 +244,35 @@ export default function DocEditor({ docId }: DocEditorProps) {
 
     console.log("⏳ Waiting for document state from server...");
 
-    return () => {
+    // Store cleanup function
+    cleanupRef.current = () => {
+      console.log("🧹 Cleaning up Y.js connection for:", docId);
       ydoc.off("update", updateHandler);
       awareness.off("update", awarenessUpdateHandler);
       awareness.destroy();
-      socket.disconnect();
+      
+      if (socket.connected) {
+        socket.disconnect();
+      }
+      
       ydoc.destroy();
-      setReady(false);
-      setContentLoaded(false);
+      
+      socketRef.current = null;
+      awarenessRef.current = null;
+      ydocRef.current = null;
+    };
+
+    return () => {
+      if (cleanupRef.current) {
+        cleanupRef.current();
+        cleanupRef.current = null;
+      }
     };
   }, [user, docId]);
 
   const isEditable = ready && (isOwner || permission === "editor");
 
-  // Create editor
+  // Create editor - ONLY when Y.js is ready
   const editor = useEditor({
     editable: isEditable,
     extensions: ready && ydocRef.current && awarenessRef.current
@@ -292,7 +298,7 @@ export default function DocEditor({ docId }: DocEditorProps) {
       console.log("✅ Editor created");
       editorRef.current = editor;
       
-      // If content was already loaded before editor was created, refresh now
+      // If content already loaded, refresh immediately
       if (contentLoaded && ydocRef.current) {
         const fragment = ydocRef.current.getXmlFragment("default");
         if (fragment.length > 0) {
@@ -303,7 +309,11 @@ export default function DocEditor({ docId }: DocEditorProps) {
         }
       }
     },
-  }, [ready, ydocRef.current, awarenessRef.current, isEditable]);
+    onDestroy: () => {
+      console.log("🗑️ Editor destroyed");
+      editorRef.current = null;
+    }
+  }, [ready, ydocRef.current, awarenessRef.current, isEditable, user]);
 
   // Store editor ref
   useEffect(() => {
@@ -312,7 +322,7 @@ export default function DocEditor({ docId }: DocEditorProps) {
     }
   }, [editor]);
 
-  // Force content refresh when both editor and content are ready
+  // Force refresh when both ready
   useEffect(() => {
     if (editor && contentLoaded && ydocRef.current) {
       const fragment = ydocRef.current.getXmlFragment("default");
@@ -325,7 +335,7 @@ export default function DocEditor({ docId }: DocEditorProps) {
     }
   }, [editor, contentLoaded]);
 
-  // Update editor editability
+  // Update editability
   useEffect(() => {
     if (editor) {
       editor.setEditable(isEditable);
