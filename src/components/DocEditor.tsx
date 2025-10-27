@@ -1,4 +1,4 @@
-// src/components/DocEditor.tsx - FIXED: Proper cleanup and connection order
+// src/components/DocEditor.tsx - FIXED: Prevents premature socket creation
 import React, { useEffect, useState, useRef } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -32,7 +32,7 @@ export default function DocEditor({ docId }: DocEditorProps) {
   const socketRef = useRef<Socket | null>(null);
   const awarenessRef = useRef<awarenessProtocol.Awareness | null>(null);
   const editorRef = useRef<any>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
+  const mountedRef = useRef(false);
 
   // Fetch user
   useEffect(() => {
@@ -77,16 +77,19 @@ export default function DocEditor({ docId }: DocEditorProps) {
     checkOwnership();
   }, [user, docId]);
 
-  // Setup Y.js collaboration
+  // Setup Y.js collaboration - FIXED with proper guards
   useEffect(() => {
-    if (!user || !docId) return;
-
-    // CRITICAL: Run cleanup first to ensure clean state
-    if (cleanupRef.current) {
-      console.log("🧹 Running previous cleanup first...");
-      cleanupRef.current();
-      cleanupRef.current = null;
+    if (!user?.token || !docId) {
+      console.log("⏸️ Waiting for user token and docId...");
+      return;
     }
+
+    // Prevent double mounting in React Strict Mode
+    if (mountedRef.current) {
+      console.log("⏸️ Already mounted, skipping...");
+      return;
+    }
+    mountedRef.current = true;
 
     console.log("🚀 Setting up Y.js for:", docId);
 
@@ -108,7 +111,17 @@ export default function DocEditor({ docId }: DocEditorProps) {
       }
     });
 
-    // Create socket connection
+    // CRITICAL: Verify we have token before creating socket
+    if (!user.token) {
+      console.error("❌ No token available!");
+      setError("Authentication token missing");
+      return;
+    }
+
+    console.log("🔐 Using token:", user.token.substring(0, 20) + "...");
+    console.log("📄 DocId:", docId);
+
+    // Create socket connection with verified credentials
     const socket = io(`${SERVER_URL}/yjs`, {
       auth: { 
         token: user.token
@@ -117,10 +130,11 @@ export default function DocEditor({ docId }: DocEditorProps) {
         docId: docId 
       },
       transports: ["websocket", "polling"],
-      reconnection: false // Prevent auto-reconnect to avoid conflicts
+      reconnection: false,
+      timeout: 10000
     });
+    
     socketRef.current = socket;
-
     let isConnected = false;
 
     socket.on("connect", () => {
@@ -131,6 +145,8 @@ export default function DocEditor({ docId }: DocEditorProps) {
 
     socket.on("connect_error", (err) => {
       console.error("❌ Connection error:", err.message);
+      console.error("   Token:", user.token ? "Present" : "Missing");
+      console.error("   DocId:", docId || "Missing");
       setError(`Connection failed: ${err.message}`);
       setReady(false);
     });
@@ -185,15 +201,13 @@ export default function DocEditor({ docId }: DocEditorProps) {
             
             setContentLoaded(true);
             
-            // Force editor refresh
-            if (editorRef.current) {
-              console.log("🔄 Forcing editor content refresh");
-              setTimeout(() => {
-                if (editorRef.current) {
-                  editorRef.current.commands.setContent(editorRef.current.getJSON());
-                }
-              }, 50);
-            }
+            // Force editor refresh with delay to ensure editor is ready
+            setTimeout(() => {
+              if (editorRef.current) {
+                console.log("🔄 Forcing editor content refresh");
+                editorRef.current.commands.setContent(editorRef.current.getJSON());
+              }
+            }, 150);
           } else if (syncType === syncProtocol.messageYjsUpdate) {
             const update = decoding.readVarUint8Array(decoder);
             Y.applyUpdate(ydoc, update);
@@ -244,9 +258,10 @@ export default function DocEditor({ docId }: DocEditorProps) {
 
     console.log("⏳ Waiting for document state from server...");
 
-    // Store cleanup function
-    cleanupRef.current = () => {
+    return () => {
       console.log("🧹 Cleaning up Y.js connection for:", docId);
+      mountedRef.current = false;
+      
       ydoc.off("update", updateHandler);
       awareness.off("update", awarenessUpdateHandler);
       awareness.destroy();
@@ -254,6 +269,7 @@ export default function DocEditor({ docId }: DocEditorProps) {
       if (socket.connected) {
         socket.disconnect();
       }
+      socket.removeAllListeners();
       
       ydoc.destroy();
       
@@ -261,18 +277,11 @@ export default function DocEditor({ docId }: DocEditorProps) {
       awarenessRef.current = null;
       ydocRef.current = null;
     };
-
-    return () => {
-      if (cleanupRef.current) {
-        cleanupRef.current();
-        cleanupRef.current = null;
-      }
-    };
-  }, [user, docId]);
+  }, [user?.token, docId]); // Only depend on token and docId
 
   const isEditable = ready && (isOwner || permission === "editor");
 
-  // Create editor - ONLY when Y.js is ready
+  // Create editor - ONLY when ready
   const editor = useEditor({
     editable: isEditable,
     extensions: ready && ydocRef.current && awarenessRef.current
@@ -298,14 +307,14 @@ export default function DocEditor({ docId }: DocEditorProps) {
       console.log("✅ Editor created");
       editorRef.current = editor;
       
-      // If content already loaded, refresh immediately
+      // If content already loaded, refresh
       if (contentLoaded && ydocRef.current) {
         const fragment = ydocRef.current.getXmlFragment("default");
         if (fragment.length > 0) {
-          console.log("🔄 Content was already loaded, refreshing editor");
+          console.log("🔄 Content already loaded, refreshing editor");
           setTimeout(() => {
             editor.commands.setContent(editor.getJSON());
-          }, 100);
+          }, 150);
         }
       }
     },
@@ -330,7 +339,7 @@ export default function DocEditor({ docId }: DocEditorProps) {
         console.log("🔄 Both editor and content ready - forcing refresh");
         setTimeout(() => {
           editor.commands.setContent(editor.getJSON());
-        }, 100);
+        }, 150);
       }
     }
   }, [editor, contentLoaded]);
@@ -360,7 +369,9 @@ export default function DocEditor({ docId }: DocEditorProps) {
       <div className="d-flex justify-content-center align-items-center" style={{ minHeight: "400px" }}>
         <div className="text-center">
           <div className="spinner-border text-primary mb-3" />
-          <p className="text-muted">Connecting...</p>
+          <p className="text-muted">
+            {!user ? "Loading user..." : !ready ? "Connecting..." : "Initializing editor..."}
+          </p>
         </div>
       </div>
     );
