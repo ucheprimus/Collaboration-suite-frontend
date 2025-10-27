@@ -259,30 +259,61 @@ const socket = io(`${SERVER_URL}/yjs`, {
 
   const isEditable = ready && (isOwner || permission === "editor");
 
-  // Create editor
-  const editor = useEditor({
-    editable: isEditable,
-    extensions: ready && ydocRef.current && awarenessRef.current
-      ? [
-          StarterKit.configure({ history: false }),
-          Collaboration.configure({ document: ydocRef.current }),
-          CollaborationCursor.configure({
-            provider: { awareness: awarenessRef.current } as any,
-            user: {
-              name: user?.email || "Anonymous",
-              color: '#' + Math.floor(Math.random()*16777215).toString(16)
-            }
-          }),
-        ]
-      : [StarterKit.configure({ history: true })],
-    editorProps: {
-      attributes: {
-        class: "prose max-w-none focus:outline-none p-4",
-        style: "min-height: 400px;",
-      },
+// Create editor
+const editor = useEditor({
+  editable: isEditable,
+  extensions: ready && ydocRef.current && awarenessRef.current
+    ? [
+        StarterKit.configure({ history: false }),
+        Collaboration.configure({ document: ydocRef.current }),
+        CollaborationCursor.configure({
+          provider: { awareness: awarenessRef.current } as any,
+          user: {
+            name: user?.email || "Anonymous",
+            color: '#' + Math.floor(Math.random()*16777215).toString(16)
+          }
+        }),
+      ]
+    : [StarterKit.configure({ history: true })],
+  editorProps: {
+    attributes: {
+      class: "prose max-w-none focus:outline-none p-4",
+      style: "min-height: 400px;",
     },
-  }, [ready, ydocRef.current, awarenessRef.current, isEditable]);
+  },
+  onCreate: ({ editor }) => {
+    // Force a render when editor is created
+    console.log("✅ Editor created and ready");
+    setTimeout(() => {
+      editor.commands.setContent(editor.getJSON());
+    }, 100);
+  },
+}, [ready, ydocRef.current, awarenessRef.current, isEditable]);
 
+
+// ADD THIS NEW useEffect HERE:
+useEffect(() => {
+  if (editor && ready && ydocRef.current) {
+    // Small delay to ensure Y.js has synced
+    const timer = setTimeout(() => {
+      const fragment = ydocRef.current!.getXmlFragment("default");
+      if (fragment.length > 0) {
+        console.log("🔄 Forcing content refresh");
+        editor.commands.setContent(editor.getJSON());
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }
+}, [editor, ready, docId]);
+
+// Update editor editability (this should already be there)
+useEffect(() => {
+  if (editor) {
+    editor.setEditable(isEditable);
+    console.log("✏️ Editable:", isEditable, "| Permission:", permission, "| Owner:", isOwner);
+  }
+}, [editor, isEditable, permission, isOwner]);
   // Update editor editability
   useEffect(() => {
     if (editor) {
