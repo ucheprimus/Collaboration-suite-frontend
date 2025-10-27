@@ -35,7 +35,9 @@ import { useSession } from "@supabase/auth-helpers-react";
 import { supabase } from "../lib/supabaseClient";
 import type { Inserts } from "../lib/supabaseClient";
 
-const SERVER_URL = import.meta.env.VITE_SOCKET_URL || "https://collaboration-suite-backend.onrender.com";
+const SERVER_URL =
+  import.meta.env.VITE_SOCKET_URL ||
+  "https://collaboration-suite-backend.onrender.com";
 
 interface Participant {
   id: string;
@@ -329,21 +331,27 @@ export default function VideoPage() {
       });
     };
 
-const handleUserJoined = async ({
-  userId,
-  socketId,
-}: {
-  userId: string;
-  socketId: string;
-}) => {
-  console.log("🎉 User joined:", userId, socketId, "Self:", session?.user?.id);
-  if (userId === session?.user?.id) {
-    console.log("⚠️ Ignoring self join");
-    return;
-  }
-  console.log("📞 Creating peer connection for:", socketId);
-  await createPeerConnection(socketId, true);
-};
+    const handleUserJoined = async ({
+      userId,
+      socketId,
+    }: {
+      userId: string;
+      socketId: string;
+    }) => {
+      console.log(
+        "🎉 User joined:",
+        userId,
+        socketId,
+        "Self:",
+        session?.user?.id
+      );
+      if (userId === session?.user?.id) {
+        console.log("⚠️ Ignoring self join");
+        return;
+      }
+      console.log("📞 Creating peer connection for:", socketId);
+      await createPeerConnection(socketId, true);
+    };
 
     const handleOffer = async ({
       offer,
@@ -531,7 +539,15 @@ const handleUserJoined = async ({
     socketId: string,
     isInitiator: boolean
   ): Promise<RTCPeerConnection> => {
+    console.log("🔧 Creating peer connection:", {
+      socketId,
+      isInitiator,
+      hasLocal: !!localStreamRef.current,
+    });
+
     if (peersRef.current.has(socketId)) {
+      console.log("♻️ Reusing existing peer for:", socketId);
+
       return peersRef.current.get(socketId)!;
     }
 
@@ -680,14 +696,15 @@ const handleUserJoined = async ({
         .from("video_participants")
         .upsert([participantPayload], { onConflict: "room_id,user_id" });
 
+      // WITH THIS:
       const { data: participantsData } = await supabase
         .from("video_participants")
         .select(
           `
-          user_id,
-          role,
-          profiles:user_id(full_name)
-        `
+    user_id,
+    role,
+    profiles!video_participants_user_id_fkey(full_name)
+  `
         )
         .eq("room_id", room.id)
         .is("left_at", null);
@@ -709,12 +726,12 @@ const handleUserJoined = async ({
         .from("video_messages")
         .select(
           `
-          id,
-          user_id,
-          message,
-          created_at,
-          profiles:user_id(full_name)
-        `
+    id,
+    user_id,
+    message,
+    created_at,
+    profiles!video_messages_user_id_fkey(full_name)
+  `
         )
         .eq("room_id", room.id)
         .order("created_at", { ascending: true });
@@ -1122,25 +1139,25 @@ const handleUserJoined = async ({
       )}
 
       {/* VIDEO CALL UI */}
-{view === "call" && (
-  <div
-    className="d-flex flex-column flex-md-row"
-    style={{ height: "100vh", background: "#1a1a1a" }}
-  >
-    {/* LEFT SIDEBAR - Participants */}
-    <div
-      style={{
-        width: "100%",
-        maxWidth: "200px",
-        background: "#2a2a2a",
-        overflowY: "auto",
-        padding: "10px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "10px",
-      }}
-      className="d-none d-md-flex"
-    >
+      {view === "call" && (
+        <div
+          className="d-flex flex-column flex-md-row"
+          style={{ height: "100vh", background: "#1a1a1a" }}
+        >
+          {/* LEFT SIDEBAR - Participants */}
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "200px",
+              background: "#2a2a2a",
+              overflowY: "auto",
+              padding: "10px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "10px",
+            }}
+            className="d-none d-md-flex"
+          >
             <div
               style={{
                 color: "#fff",
@@ -1424,17 +1441,17 @@ const handleUserJoined = async ({
             </div>
           </div>
 
-    {/* RIGHT SIDEBAR - Chat & People */}
-<div
-  style={{
-    width: "100%",
-    maxWidth: "320px",
-    background: "#fff",
-    display: "flex",
-    flexDirection: "column",
-  }}
-  className="d-none d-lg-flex"
->
+          {/* RIGHT SIDEBAR - Chat & People */}
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "320px",
+              background: "#fff",
+              display: "flex",
+              flexDirection: "column",
+            }}
+            className="d-none d-lg-flex"
+          >
             <Tab.Container defaultActiveKey="chat">
               <Nav variant="tabs" style={{ borderBottom: "1px solid #ddd" }}>
                 <Nav.Item style={{ flex: 1 }}>
@@ -1685,6 +1702,37 @@ const handleUserJoined = async ({
           </Button>
         </Modal.Footer>
       </Modal>
+
+      {/* JOIN MEETING MODAL */}
+      <Modal show={showJoinModal} onHide={() => setShowJoinModal(false)}>
+        <Modal.Header closeButton>
+          <Modal.Title>Join Meeting</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            <Form.Group>
+              <Form.Label>Room Code</Form.Label>
+              <Form.Control
+                placeholder="Enter room code"
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value)}
+              />
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowJoinModal(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleConfirmJoin}
+            disabled={!joinCode.trim()}
+          >
+            Join
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </div>
   );
 }
@@ -1799,38 +1847,6 @@ function ParticipantThumbnail({
           🔊 LIVE
         </div>
       )}
-
-
-      {/* JOIN MEETING MODAL */}
-<Modal show={showJoinModal} onHide={() => setShowJoinModal(false)}>
-  <Modal.Header closeButton>
-    <Modal.Title>Join Meeting</Modal.Title>
-  </Modal.Header>
-  <Modal.Body>
-    <Form>
-      <Form.Group>
-        <Form.Label>Room Code</Form.Label>
-        <Form.Control
-          placeholder="Enter room code"
-          value={joinCode}
-          onChange={(e) => setJoinCode(e.target.value)}
-        />
-      </Form.Group>
-    </Form>
-  </Modal.Body>
-  <Modal.Footer>
-    <Button variant="secondary" onClick={() => setShowJoinModal(false)}>
-      Cancel
-    </Button>
-    <Button
-      variant="primary"
-      onClick={handleConfirmJoin}
-      disabled={!joinCode.trim()}
-    >
-      Join
-    </Button>
-  </Modal.Footer>
-</Modal>
     </div>
   );
 }
