@@ -804,6 +804,15 @@ export default function VideoPage() {
       setCurrentRoomCode(room.room_code);
       setCurrentRoomTitle(room.title);
       setView("call");
+
+      // ADD THIS - Force local video to show immediately
+setTimeout(() => {
+  if (localVideoRef.current && localStreamRef.current) {
+    localVideoRef.current.srcObject = localStreamRef.current;
+    localVideoRef.current.play().catch(err => console.error("Local video play error:", err));
+    console.log("🎥 Local video attached and playing");
+  }
+}, 100);
     } catch (err: any) {
       setError(err?.message || "Failed to join");
     } finally {
