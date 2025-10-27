@@ -329,16 +329,21 @@ export default function VideoPage() {
       });
     };
 
-    const handleUserJoined = async ({
-      userId,
-      socketId,
-    }: {
-      userId: string;
-      socketId: string;
-    }) => {
-      if (userId === session?.user?.id) return;
-      await createPeerConnection(socketId, true);
-    };
+const handleUserJoined = async ({
+  userId,
+  socketId,
+}: {
+  userId: string;
+  socketId: string;
+}) => {
+  console.log("🎉 User joined:", userId, socketId, "Self:", session?.user?.id);
+  if (userId === session?.user?.id) {
+    console.log("⚠️ Ignoring self join");
+    return;
+  }
+  console.log("📞 Creating peer connection for:", socketId);
+  await createPeerConnection(socketId, true);
+};
 
     const handleOffer = async ({
       offer,
@@ -1117,23 +1122,25 @@ export default function VideoPage() {
       )}
 
       {/* VIDEO CALL UI */}
-      {view === "call" && (
-        <div
-          className="d-flex"
-          style={{ height: "100vh", background: "#1a1a1a" }}
-        >
-          {/* LEFT SIDEBAR - Participants */}
-          <div
-            style={{
-              width: "200px",
-              background: "#2a2a2a",
-              overflowY: "auto",
-              padding: "10px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "10px",
-            }}
-          >
+{view === "call" && (
+  <div
+    className="d-flex flex-column flex-md-row"
+    style={{ height: "100vh", background: "#1a1a1a" }}
+  >
+    {/* LEFT SIDEBAR - Participants */}
+    <div
+      style={{
+        width: "100%",
+        maxWidth: "200px",
+        background: "#2a2a2a",
+        overflowY: "auto",
+        padding: "10px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "10px",
+      }}
+      className="d-none d-md-flex"
+    >
             <div
               style={{
                 color: "#fff",
@@ -1417,15 +1424,17 @@ export default function VideoPage() {
             </div>
           </div>
 
-          {/* RIGHT SIDEBAR - Chat & People */}
-          <div
-            style={{
-              width: "320px",
-              background: "#fff",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
+    {/* RIGHT SIDEBAR - Chat & People */}
+<div
+  style={{
+    width: "100%",
+    maxWidth: "320px",
+    background: "#fff",
+    display: "flex",
+    flexDirection: "column",
+  }}
+  className="d-none d-lg-flex"
+>
             <Tab.Container defaultActiveKey="chat">
               <Nav variant="tabs" style={{ borderBottom: "1px solid #ddd" }}>
                 <Nav.Item style={{ flex: 1 }}>
@@ -1790,6 +1799,38 @@ function ParticipantThumbnail({
           🔊 LIVE
         </div>
       )}
+
+
+      {/* JOIN MEETING MODAL */}
+<Modal show={showJoinModal} onHide={() => setShowJoinModal(false)}>
+  <Modal.Header closeButton>
+    <Modal.Title>Join Meeting</Modal.Title>
+  </Modal.Header>
+  <Modal.Body>
+    <Form>
+      <Form.Group>
+        <Form.Label>Room Code</Form.Label>
+        <Form.Control
+          placeholder="Enter room code"
+          value={joinCode}
+          onChange={(e) => setJoinCode(e.target.value)}
+        />
+      </Form.Group>
+    </Form>
+  </Modal.Body>
+  <Modal.Footer>
+    <Button variant="secondary" onClick={() => setShowJoinModal(false)}>
+      Cancel
+    </Button>
+    <Button
+      variant="primary"
+      onClick={handleConfirmJoin}
+      disabled={!joinCode.trim()}
+    >
+      Join
+    </Button>
+  </Modal.Footer>
+</Modal>
     </div>
   );
 }
