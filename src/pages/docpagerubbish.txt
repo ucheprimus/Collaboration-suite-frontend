@@ -1,4 +1,4 @@
-// src/pages/DocPage.tsx - FIXED variable naming
+// src/pages/DocPage.tsx - FIXED with proper token handling
 import React, { useState, useEffect } from "react";
 import DocEditor from "../components/DocEditor";
 import { Dropdown, Modal, Form, Button, Badge, Spinner } from "react-bootstrap";
@@ -45,8 +45,11 @@ export default function DocPage() {
   const [newCollabEmail, setNewCollabEmail] = useState("");
   const [newCollabPermission, setNewCollabPermission] = useState<"viewer" | "editor">("editor");
 
-  const API_URL = import.meta.env.VITE_API_URL || "https://collaboration-suite-backend.onrender.com";
 
+  const API_URL = import.meta.env.VITE_API_URL || "https://collaboration-suite-backend.onrender.com";
+  
+
+  // FIXED: Get fresh token function
   const getToken = async () => {
     try {
       const { data: { session }, error } = await supabase.auth.getSession();
@@ -61,6 +64,7 @@ export default function DocPage() {
         return null;
       }
 
+      // Check if token is expiring soon (within 5 minutes)
       const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
       const now = Date.now();
       
@@ -123,6 +127,7 @@ export default function DocPage() {
       console.log("📡 Fetching documents...");
 
       const response = await fetch(`${API_URL}/docs/user`, {
+
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -131,7 +136,7 @@ export default function DocPage() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+        throw new Error(errorData.error || `HTTP ${res.status}`);
       }
 
       const data = await response.json();
@@ -159,6 +164,7 @@ export default function DocPage() {
       }
 
       const response = await fetch(`${API_URL}/docs/user`, {
+
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -202,14 +208,14 @@ export default function DocPage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/docs/${renameId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ title: renameTitle }),
-      });
+const res = await fetch(`${API_URL}/docs/${renameId}`, {
+  method: "PUT",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  },
+  body: JSON.stringify({ title: renameTitle }),
+});
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -241,11 +247,11 @@ export default function DocPage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/docs/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
+// ✅ CORRECT:
+const res = await fetch(`${API_URL}/docs/${id}`, {
+  method: "DELETE",
+  headers: { Authorization: `Bearer ${token}` },
+});
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Failed to delete");
@@ -268,14 +274,15 @@ export default function DocPage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/docs/${id}/visibility`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ is_public: !current }),
-      });
+      // ✅ CORRECT:
+const res = await fetch(`${API_URL}/docs/${id}/visibility`, {
+  method: "PUT",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  },
+  body: JSON.stringify({ is_public: !current }),
+});
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -306,13 +313,14 @@ export default function DocPage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/api/collaborators/${docId}`, {
+        // ✅ CORRECT:
+const res = await fetch(`${API_URL}/api/collaborators/${docId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+        throw new Error(errorData.error || `HTTP ${res.status}`);
       }
 
       const data = await response.json();
@@ -341,7 +349,8 @@ export default function DocPage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/api/collaborators/${docId}`, {
+       // ✅ CORRECT:
+const res = await fetch(`${API_URL}/api/collaborators/${docId}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -375,7 +384,9 @@ export default function DocPage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/api/collaborators/${docId}/${collabId}`, {
+      const res = await
+        fetch(`${API_URL}/api/collaborators/${docId}/${collabId}`, { 
+
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -407,10 +418,13 @@ export default function DocPage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/api/collaborators/${docId}/${collabId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await 
+      fetch(`${API_URL}/api/collaborators/${docId}/${collabId}`, 
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
       if (!response.ok) {
         const errorData = await response.json();

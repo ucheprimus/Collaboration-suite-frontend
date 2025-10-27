@@ -119,14 +119,10 @@ const socket = io(`${SERVER_URL}/yjs`, {
     token: user.token,
     docId: docId 
   },
-  query: { 
-    token: user.token,
-    docId: docId 
-  },
-  extraHeaders: {
-    'Authorization': `Bearer ${user.token}`
-  },
   transports: ["websocket", "polling"],
+  reconnection: true,
+  reconnectionDelay: 1000,
+  reconnectionAttempts: 5
 });
     socketRef.current = socket;
 
