@@ -584,6 +584,8 @@ export default function DocPage() {
         </Modal.Footer>
       </Modal>
 
+      {/* this is wroking version  */}
+
       {/* Rename Doc Modal */}
       <Modal show={!!renameId} onHide={() => setRenameId(null)}>
         <Modal.Header closeButton>
