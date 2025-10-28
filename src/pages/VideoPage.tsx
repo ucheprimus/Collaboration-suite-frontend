@@ -292,10 +292,14 @@ export default function VideoPage() {
     }
   }, [localStreamRef.current, view, cameraOn]);
 
-  useEffect(() => {
+useEffect(() => {
     if (!socket || !roomId) return;
 
     const handleParticipantsUpdate = async (data: { participants: any[] }) => {
+      console.log("👥 Participants update received:", data.participants.length);
+      console.log("   Self ID:", session?.user?.id);
+      console.log("   Self socket:", socket?.id);
+
       const enrichedParticipants = await Promise.all(
         data.participants.map(async (p) => {
           if (!p.user_name) {
@@ -310,7 +314,8 @@ export default function VideoPage() {
             }
             p.user_name = (profile as ProfileData | null)?.full_name || "Guest";
           }
-          return {
+          
+          const result = {
             id: p.user_id,
             user_id: p.user_id,
             user_name: p.user_name,
@@ -318,6 +323,9 @@ export default function VideoPage() {
             isSelf: p.user_id === session?.user?.id,
             socketId: p.socketId || p.user_id,
           };
+          
+          console.log("   Participant:", result.user_name, "isSelf:", result.isSelf, "socketId:", result.socketId);
+          return result;
         })
       );
 
@@ -334,22 +342,34 @@ export default function VideoPage() {
     const handleUserJoined = async ({
       userId,
       socketId,
+      userName,
     }: {
       userId: string;
       socketId: string;
+      userName?: string;
     }) => {
       console.log(
         "🎉 User joined:",
-        userId,
+        userName || userId,
+        "socket:",
         socketId,
         "Self:",
         session?.user?.id
       );
+      
+      // ✅ Prevent connecting to yourself
       if (userId === session?.user?.id) {
         console.log("⚠️ Ignoring self join");
         return;
       }
-      console.log("📞 Creating peer connection for:", socketId);
+
+      // ✅ Prevent duplicate connections
+      if (peersRef.current.has(socketId)) {
+        console.log("♻️ Already connected to", socketId);
+        return;
+      }
+
+      console.log("📞 Creating peer connection for:", userName || socketId);
       await createPeerConnection(socketId, true);
     };
 
@@ -360,11 +380,13 @@ export default function VideoPage() {
       offer: RTCSessionDescriptionInit;
       from: string;
     }) => {
+      console.log("📨 Received offer from:", from);
       const peer = await createPeerConnection(from, false);
       await peer.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
       socket.emit("webrtc:answer", { roomId, answer, to: from });
+      console.log("📤 Sent answer to:", from);
     };
 
     const handleAnswer = async ({
@@ -374,9 +396,13 @@ export default function VideoPage() {
       answer: RTCSessionDescriptionInit;
       from: string;
     }) => {
+      console.log("📨 Received answer from:", from);
       const peer = peersRef.current.get(from);
       if (peer) {
         await peer.setRemoteDescription(new RTCSessionDescription(answer));
+        console.log("✅ Answer processed for:", from);
+      } else {
+        console.warn("⚠️ No peer found for answer from:", from);
       }
     };
 
@@ -391,6 +417,7 @@ export default function VideoPage() {
       if (peer && candidate) {
         try {
           await peer.addIceCandidate(new RTCIceCandidate(candidate));
+          console.log("❄️ ICE candidate added for:", from);
         } catch (err) {
           console.error("❄️ ICE error:", err);
         }
@@ -398,6 +425,7 @@ export default function VideoPage() {
     };
 
     const handleUserLeft = ({ socketId }: { socketId: string }) => {
+      console.log("👋 User left:", socketId);
       const peer = peersRef.current.get(socketId);
       if (peer) {
         peer.close();
@@ -739,7 +767,6 @@ export default function VideoPage() {
         setParticipants(enriched);
       }
 
-
       // REPLACE WITH:
       const { data: chatData, error: chatError } = await supabase
         .from("video_messages")
@@ -781,14 +808,34 @@ export default function VideoPage() {
       setCurrentRoomTitle(room.title);
       setView("call");
 
-      // ADD THIS - Force local video to show immediately
-setTimeout(() => {
-  if (localVideoRef.current && localStreamRef.current) {
-    localVideoRef.current.srcObject = localStreamRef.current;
-    localVideoRef.current.play().catch(err => console.error("Local video play error:", err));
-    console.log("🎥 Local video attached and playing");
-  }
-}, 100);
+      // ✅ ADD: Wait for participants list, then create peer connections
+      setTimeout(async () => {
+        if (localVideoRef.current && localStreamRef.current) {
+          localVideoRef.current.srcObject = localStreamRef.current;
+          localVideoRef.current
+            .play()
+            .catch((err) => console.error("Local video play error:", err));
+          console.log("🎥 Local video attached and playing");
+        }
+
+        // ✅ Create peer connections with existing participants
+        const otherParticipants = participants.filter(
+          (p) => !p.isSelf && p.socketId !== socket.id
+        );
+        console.log(
+          `🔗 Creating ${otherParticipants.length} peer connections...`
+        );
+
+        for (const participant of otherParticipants) {
+          if (participant.socketId && participant.socketId !== session.user.id) {
+
+
+            console.log(`🤝 Initiating connection to ${participant.user_name}`);
+            await createPeerConnection(participant.socketId, true);
+          }
+        }
+      }, 500); // Give time for participants list to update
+
     } catch (err: any) {
       setError(err?.message || "Failed to join");
     } finally {
