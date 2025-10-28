@@ -439,6 +439,21 @@ useEffect(() => {
       }
     };
 
+
+    // Add this inside your useEffect that listens to socket events
+socket.on("video:room-ended", ({ reason }) => {
+  alert(reason || "Meeting has ended");
+  handleEndCall(); // Your existing end call function
+});
+
+// Also add error handler
+socket.on("video:error", ({ message }) => {
+  setError(message);
+  if (message.includes("ended")) {
+    handleEndCall();
+  }
+});
+
     socket.on("video:participants-update", handleParticipantsUpdate);
     socket.on("video:chat-message", handleChatMessage);
     socket.on("webrtc:user-joined", handleUserJoined);
