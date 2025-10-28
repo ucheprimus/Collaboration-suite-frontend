@@ -739,18 +739,6 @@ export default function VideoPage() {
         setParticipants(enriched);
       }
 
-      if (participantsData) {
-        setParticipants(
-          participantsData.map((p: any) => ({
-            id: p.user_id,
-            user_id: p.user_id,
-            user_name: p.profiles?.full_name || "Guest",
-            role: p.role,
-            isSelf: p.user_id === session.user.id,
-            socketId: p.user_id,
-          }))
-        );
-      }
 
       // REPLACE WITH:
       const { data: chatData, error: chatError } = await supabase
@@ -780,18 +768,6 @@ export default function VideoPage() {
           })
         );
         setMessages(enriched);
-      }
-
-      if (chatData) {
-        setMessages(
-          chatData.map((m: any) => ({
-            id: m.id,
-            user_id: m.user_id,
-            user_name: m.profiles?.full_name || "Unknown",
-            message: m.message,
-            created_at: m.created_at,
-          }))
-        );
       }
 
       socket.emit("video:join-room", {
