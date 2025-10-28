@@ -84,6 +84,9 @@ export default function VideoPage() {
   const [testMode, setTestMode] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
 
+  const [isHost, setIsHost] = useState(false);
+
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
@@ -292,7 +295,6 @@ export default function VideoPage() {
     }
   }, [localStreamRef.current, view, cameraOn]);
 
-
   useEffect(() => {
     if (!socket || !roomId) return;
 
@@ -303,7 +305,7 @@ export default function VideoPage() {
 
       const enrichedParticipants = await Promise.all(
         data.participants
-          .filter(p => p.user_id !== session?.user?.id) // ✅ EXCLUDE SELF
+          .filter((p) => p.user_id !== session?.user?.id) // ✅ EXCLUDE SELF
           .map(async (p) => {
             if (!p.user_name) {
               const { data: profile } = await supabase
@@ -315,9 +317,10 @@ export default function VideoPage() {
               interface ProfileData {
                 full_name: string;
               }
-              p.user_name = (profile as ProfileData | null)?.full_name || "Guest";
+              p.user_name =
+                (profile as ProfileData | null)?.full_name || "Guest";
             }
-            
+
             const result = {
               id: p.user_id,
               user_id: p.user_id,
@@ -326,14 +329,19 @@ export default function VideoPage() {
               isSelf: false, // Never self since we filtered
               socketId: p.socketId || p.user_id,
             };
-            
-            console.log("   Remote Participant:", result.user_name, "socketId:", result.socketId);
+
+            console.log(
+              "   Remote Participant:",
+              result.user_name,
+              "socketId:",
+              result.socketId
+            );
             return result;
           })
       );
 
       setParticipants(enrichedParticipants);
-      
+
       console.log(`✅ Set ${enrichedParticipants.length} remote participants`);
     };
 
@@ -443,6 +451,13 @@ export default function VideoPage() {
         setActiveSpeakerId(null);
       }
     };
+
+    socket.on("video:meeting-ended", ({ reason }) => {
+  alert(reason || "Meeting has been ended by the host");
+  handleEndCall();
+});
+
+
 
     // Add this inside your useEffect that listens to socket events
     socket.on("video:room-ended", ({ reason }) => {
@@ -703,164 +718,140 @@ export default function VideoPage() {
     }
   };
 
-  const joinRoom = async (roomCodeOrId: string, useRoomId = false) => {
-    if (!socket || !session) {
-      setError("Not connected");
-      return;
+const joinRoom = async (roomCodeOrId: string, useRoomId = false) => {
+  if (!socket || !session) {
+    setError("Not connected");
+    return;
+  }
+
+  setLoading(true);
+  setError(null);
+
+  try {
+    const query = useRoomId
+      ? supabase.from("video_rooms").select("*").eq("id", roomCodeOrId).single()
+      : supabase.from("video_rooms").select("*").eq("room_code", roomCodeOrId).single();
+
+    const { data: room, error: roomError } = await query;
+
+    if (roomError || !room) throw new Error("Room not found");
+    if (!room.is_active) throw new Error("Room has ended");
+
+    // ✅ CHECK IF USER IS HOST
+    const userIsHost = room.created_by === session.user.id;
+    setIsHost(userIsHost);
+    
+    console.log(`🎯 User role: ${userIsHost ? "HOST" : "GUEST"}`);
+
+    await startLocalStream();
+
+    if (!localStreamRef.current) {
+      throw new Error("Failed to initialize media stream");
     }
 
-    setLoading(true);
-    setError(null);
+    const participantPayload: Inserts<"video_participants"> = {
+      room_id: room.id,
+      user_id: session.user.id,
+      role: userIsHost ? "host" : "guest",
+      joined_at: new Date().toISOString(),
+    };
 
-    try {
-      const query = useRoomId
-        ? supabase
-            .from("video_rooms")
-            .select("*")
-            .eq("id", roomCodeOrId)
-            .single()
-        : supabase
-            .from("video_rooms")
-            .select("*")
-            .eq("room_code", roomCodeOrId)
+    await supabase
+      .from("video_participants")
+      .upsert([participantPayload], { onConflict: "room_id,user_id" });
+
+    // Fetch participants
+    const { data: participantsData } = await supabase
+      .from("video_participants")
+      .select("user_id, role")
+      .eq("room_id", room.id)
+      .is("left_at", null);
+
+    if (participantsData) {
+      const enriched = await Promise.all(
+        participantsData.map(async (p: any) => {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("id", p.user_id)
             .single();
 
-      const { data: room, error: roomError } = await query;
-
-      if (roomError || !room) throw new Error("Room not found");
-      if (!room.is_active) throw new Error("Room has ended");
-
-      await startLocalStream();
-
-      // Add validation
-      if (!localStreamRef.current) {
-        throw new Error("Failed to initialize media stream");
-      }
-
-      console.log("✅ Local stream ready with tracks:", {
-        video: localStreamRef.current.getVideoTracks().length,
-        audio: localStreamRef.current.getAudioTracks().length,
-      });
-
-      const participantPayload: Inserts<"video_participants"> = {
-        room_id: room.id,
-        user_id: session.user.id,
-        role: "guest",
-        joined_at: new Date().toISOString(),
-      };
-
-      await supabase
-        .from("video_participants")
-        .upsert([participantPayload], { onConflict: "room_id,user_id" });
-
-      // REPLACE WITH:
-      const { data: participantsData, error: participantsError } =
-        await supabase
-          .from("video_participants")
-          .select("user_id, role")
-          .eq("room_id", room.id)
-          .is("left_at", null);
-
-      if (participantsError)
-        console.error("Participants error:", participantsError);
-
-      if (participantsData) {
-        const enriched = await Promise.all(
-          participantsData.map(async (p: any) => {
-            const { data: profile } = await supabase
-              .from("profiles")
-              .select("full_name")
-              .eq("id", p.user_id)
-              .single();
-
-            return {
-              id: p.user_id,
-              user_id: p.user_id,
-              user_name: profile?.full_name || "Guest",
-              role: p.role,
-              isSelf: p.user_id === session.user.id,
-              socketId: p.user_id,
-            };
-          })
-        );
-        setParticipants(enriched);
-      }
-
-      // REPLACE WITH:
-      const { data: chatData, error: chatError } = await supabase
-        .from("video_messages")
-        .select("id, user_id, message, created_at")
-        .eq("room_id", room.id)
-        .order("created_at", { ascending: true });
-
-      if (chatError) console.error("Chat error:", chatError);
-
-      if (chatData) {
-        const enriched = await Promise.all(
-          chatData.map(async (m: any) => {
-            const { data: profile } = await supabase
-              .from("profiles")
-              .select("full_name")
-              .eq("id", m.user_id)
-              .single();
-
-            return {
-              id: m.id,
-              user_id: m.user_id,
-              user_name: profile?.full_name || "Unknown",
-              message: m.message,
-              created_at: m.created_at,
-            };
-          })
-        );
-        setMessages(enriched);
-      }
-
-      socket.emit("video:join-room", {
-        roomId: room.id,
-        userId: session.user.id,
-        userName: session.user.user_metadata?.full_name || "Guest",
-      });
-
-      setRoomId(room.id);
-      setCurrentRoomCode(room.room_code);
-      setCurrentRoomTitle(room.title);
-      setView("call");
-
-      // ✅ ADD: Wait for participants list, then create peer connections
-      setTimeout(async () => {
-        if (localVideoRef.current && localStreamRef.current) {
-          localVideoRef.current.srcObject = localStreamRef.current;
-          localVideoRef.current
-            .play()
-            .catch((err) => console.error("Local video play error:", err));
-          console.log("🎥 Local video attached and playing");
-        }
-
-        // ✅ Create peer connections with existing participants
-        const otherParticipants = participants.filter(
-          (p) => !p.isSelf && p.socketId !== socket.id
-        );
-        console.log(
-          `🔗 Creating ${otherParticipants.length} peer connections...`
-        );
-
-        for (const participant of otherParticipants) {
-          if (
-            participant.socketId &&
-            participant.socketId !== session.user.id
-          ) {
-            console.log(`🤝 Initiating connection to ${participant.user_name}`);
-            await createPeerConnection(participant.socketId, true);
-          }
-        }
-      }, 500); // Give time for participants list to update
-    } catch (err: any) {
-      setError(err?.message || "Failed to join");
-    } finally {
-      setLoading(false);
+          return {
+            id: p.user_id,
+            user_id: p.user_id,
+            user_name: profile?.full_name || "Guest",
+            role: p.role,
+            isSelf: p.user_id === session.user.id,
+            socketId: p.user_id,
+          };
+        })
+      );
+      setParticipants(enriched);
     }
-  };
+
+    // Fetch chat messages
+    const { data: chatData } = await supabase
+      .from("video_messages")
+      .select("id, user_id, message, created_at")
+      .eq("room_id", room.id)
+      .order("created_at", { ascending: true });
+
+    if (chatData) {
+      const enriched = await Promise.all(
+        chatData.map(async (m: any) => {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("id", m.user_id)
+            .single();
+
+          return {
+            id: m.id,
+            user_id: m.user_id,
+            user_name: profile?.full_name || "Unknown",
+            message: m.message,
+            created_at: m.created_at,
+          };
+        })
+      );
+      setMessages(enriched);
+    }
+
+    socket.emit("video:join-room", {
+      roomId: room.id,
+      userId: session.user.id,
+      userName: session.user.user_metadata?.full_name || "Guest",
+    });
+
+    setRoomId(room.id);
+    setCurrentRoomCode(room.room_code);
+    setCurrentRoomTitle(room.title);
+    setView("call");
+
+    setTimeout(async () => {
+      if (localVideoRef.current && localStreamRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+        localVideoRef.current.play().catch((err) => console.error("Local video play error:", err));
+      }
+
+      const otherParticipants = participants.filter(
+        (p) => !p.isSelf && p.socketId !== socket.id
+      );
+
+      for (const participant of otherParticipants) {
+        if (participant.socketId && participant.socketId !== session.user.id) {
+          await createPeerConnection(participant.socketId, true);
+        }
+      }
+    }, 500);
+  } catch (err: any) {
+    setError(err?.message || "Failed to join");
+  } finally {
+    setLoading(false);
+  }
+};
+
+
 
   const sendMessage = async () => {
     const text = messageInput.trim();
@@ -1006,6 +997,49 @@ export default function VideoPage() {
       setView("create");
     }
   };
+
+  
+const handleEndMeeting = async () => {
+  if (!roomId || !isHost) {
+    console.error("❌ Only host can end meeting");
+    return;
+  }
+
+  const confirmEnd = window.confirm(
+    "⚠️ This will end the meeting for EVERYONE. Continue?"
+  );
+  
+  if (!confirmEnd) return;
+
+  try {
+    console.log(`🛑 HOST ending meeting ${roomId}`);
+
+    // Mark room as inactive
+    await supabase
+      .from("video_rooms")
+      .update({
+        is_active: false,
+        ended_at: new Date().toISOString(),
+      })
+      .eq("id", roomId);
+
+    // Mark all participants as left
+    await supabase
+      .from("video_participants")
+      .update({ left_at: new Date().toISOString() })
+      .eq("room_id", roomId)
+      .is("left_at", null);
+
+    // Notify server to broadcast end to everyone
+    socket?.emit("video:end-meeting", { roomId });
+
+    // Clean up and leave
+    await handleEndCall();
+  } catch (err) {
+    console.error("Error ending meeting:", err);
+    setError("Failed to end meeting");
+  }
+};
 
   const toggleMic = () => {
     if (!localStreamRef.current) return;
@@ -1235,319 +1269,393 @@ export default function VideoPage() {
         </Container>
       )}
 
-      {/* VIDEO CALL UI */}
-      {view === "call" && (
-        <div
-          className="d-flex flex-column flex-md-row"
-          style={{ height: "100vh", background: "#1a1a1a" }}
-        >
-          {/* LEFT SIDEBAR - Participants */}
+
+
+{view === "call" && (
+  <div
+    className="d-flex flex-column flex-md-row"
+    style={{ height: "100vh", background: "#0f0f0f" }}
+  >
+    {/* LEFT SIDEBAR - Participants */}
+    <div
+      style={{
+        width: "240px",
+        minWidth: "240px",
+        background: "linear-gradient(180deg, #1a1a1a 0%, #0f0f0f 100%)",
+        borderRight: "1px solid #2a2a2a",
+        overflowY: "auto",
+        padding: "16px 12px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+      }}
+      className="d-none d-md-flex"
+    >
+      <div
+        style={{
+          color: "#fff",
+          fontSize: "12px",
+          fontWeight: "700",
+          letterSpacing: "0.5px",
+          textTransform: "uppercase",
+          marginBottom: "8px",
+          opacity: 0.7,
+        }}
+      >
+        In Call · {participants.length + 1}
+      </div>
+
+      {/* LOCAL USER */}
+      <div
+        style={{
+          position: "relative",
+          borderRadius: "16px",
+          overflow: "hidden",
+          border: "2px solid #4CAF50",
+          background: "#000",
+          aspectRatio: "16/9",
+          boxShadow: "0 4px 12px rgba(76, 175, 80, 0.3)",
+        }}
+      >
+        <video
+          ref={localVideoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: cameraOn ? "block" : "none",
+          }}
+        />
+
+        {!cameraOn && (
           <div
             style={{
-              width: "200px",
-              minWidth: "200px",
-              maxWidth: "200px",
-              background: "#2a2a2a",
-              overflowY: "auto",
-              padding: "10px",
+              width: "100%",
+              height: "100%",
               display: "flex",
-              flexDirection: "column",
-              gap: "10px",
+              justifyContent: "center",
+              alignItems: "center",
+              background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
             }}
-            className="d-none d-md-flex"
           >
             <div
               style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "50%",
+                background: "rgba(255,255,255,0.25)",
+                backdropFilter: "blur(10px)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "24px",
                 color: "#fff",
-                fontSize: "14px",
-                fontWeight: "600",
-                marginBottom: "5px",
+                fontWeight: "700",
               }}
             >
-              Participants ({participants.length + 1})
+              {session?.user?.user_metadata?.full_name?.[0]?.toUpperCase() || "U"}
             </div>
+          </div>
+        )}
 
-            {/* LOCAL USER */}
-            <div
-              style={{
-                position: "relative",
-                borderRadius: "12px",
-                overflow: "hidden",
-                border: "2px solid #4CAF50",
-                background: "#000",
-                cursor: "pointer",
-                width: "100%",
-                height: "120px",
-              }}
-            >
-              <video
-                ref={localVideoRef}
-                autoPlay
-                playsInline
-                muted
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  display: cameraOn ? "block" : "none",
-                }}
-              />
+        <div
+          style={{
+            position: "absolute",
+            bottom: "8px",
+            left: "8px",
+            right: "8px",
+            background: "rgba(0,0,0,0.85)",
+            backdropFilter: "blur(10px)",
+            color: "#fff",
+            padding: "6px 10px",
+            borderRadius: "8px",
+            fontSize: "11px",
+            fontWeight: "600",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <span>You {isHost && "👑"}</span>
+          <span>{micOn ? "🎤" : "🔇"}</span>
+        </div>
+      </div>
 
-              {!cameraOn && (
-                <div
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    background:
-                      "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: "50px",
-                      height: "50px",
-                      borderRadius: "50%",
-                      background: "rgba(255,255,255,0.2)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "20px",
-                      color: "#fff",
-                      fontWeight: "600",
-                    }}
-                  >
-                    {session?.user?.user_metadata?.full_name?.[0]?.toUpperCase() ||
-                      "U"}
-                  </div>
-                </div>
-              )}
+      {/* OTHER PARTICIPANTS */}
+      {participants
+        .filter((p) => !p.isSelf)
+        .map((participant) => (
+          <ParticipantThumbnail
+            key={participant.socketId || participant.id}
+            participant={participant}
+            isActive={activeSpeakerId === (participant.socketId || participant.id)}
+            onSelect={() => {
+              if (participant.stream) {
+                switchToSpeaker(
+                  participant.socketId || participant.id,
+                  participant.stream
+                );
+              }
+            }}
+          />
+        ))}
 
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: "5px",
-                  left: "5px",
-                  background: "rgba(0,0,0,0.7)",
-                  color: "#fff",
-                  padding: "3px 8px",
-                  borderRadius: "6px",
-                  fontSize: "11px",
-                  fontWeight: "500",
-                }}
-              >
-                You {micOn ? "🎤" : "🔇"}
-              </div>
-            </div>
+      {participants.filter((p) => !p.isSelf).length === 0 && (
+        <div
+          style={{
+            color: "#999",
+            fontSize: "13px",
+            textAlign: "center",
+            marginTop: "32px",
+            padding: "20px",
+            background: "rgba(255,255,255,0.05)",
+            borderRadius: "12px",
+          }}
+        >
+          <div style={{ fontSize: "32px", marginBottom: "8px" }}>👥</div>
+          <div>Waiting for others to join...</div>
+        </div>
+      )}
+    </div>
 
-            {/* OTHER PARTICIPANTS */}
-            {participants
-              .filter((p) => !p.isSelf)
-              .map((participant) => (
-                <ParticipantThumbnail
-                  key={participant.socketId || participant.id}
-                  participant={participant}
-                  isActive={
-                    activeSpeakerId === (participant.socketId || participant.id)
-                  }
-                  onSelect={() => {
-                    if (participant.stream) {
-                      switchToSpeaker(
-                        participant.socketId || participant.id,
-                        participant.stream
-                      );
-                    }
-                  }}
-                />
-              ))}
-
-            {participants.filter((p) => !p.isSelf).length === 0 && (
-              <p
-                style={{
-                  color: "#999",
-                  fontSize: "12px",
-                  textAlign: "center",
-                  marginTop: "20px",
-                }}
-              >
-                No other participants yet
-              </p>
+    {/* CENTER - Main Video */}
+    <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+      {/* TOP BAR */}
+      <div
+        style={{
+          background: "linear-gradient(180deg, #1a1a1a 0%, rgba(26, 26, 26, 0.95) 100%)",
+          backdropFilter: "blur(20px)",
+          padding: "20px 32px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          borderBottom: "1px solid rgba(255,255,255,0.1)",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+        }}
+      >
+        <div>
+          <h5 style={{ color: "#fff", margin: 0, fontSize: "20px", fontWeight: "600" }}>
+            {currentRoomTitle}
+          </h5>
+          <div style={{ color: "#999", fontSize: "14px", marginTop: "4px", display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <FaClock />
+              {formatDuration(callDuration)}
+            </span>
+            {isHost && (
+              <Badge bg="success" style={{ fontSize: "11px" }}>
+                HOST
+              </Badge>
             )}
           </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <Badge
+            bg="secondary"
+            style={{
+              fontSize: "14px",
+              padding: "8px 16px",
+              background: "rgba(255,255,255,0.1)",
+              backdropFilter: "blur(10px)",
+              border: "1px solid rgba(255,255,255,0.2)",
+            }}
+          >
+            Room: {currentRoomCode}
+          </Badge>
+          <Button
+            size="sm"
+            variant="link"
+            onClick={() => copyRoomCode(currentRoomCode || "")}
+            style={{ color: "#fff", textDecoration: "none" }}
+          >
+            {copiedCode === currentRoomCode ? <FaCheck color="#4CAF50" /> : <FaCopy />}
+          </Button>
+        </div>
+      </div>
 
-          {/* CENTER - Main Video */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-            {/* TOP BAR */}
-            <div
-              style={{
-                background: "#2a2a2a",
-                padding: "15px 30px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                borderBottom: "1px solid #3a3a3a",
-              }}
-            >
-              <div>
-                <h5 style={{ color: "#fff", margin: 0, fontSize: "18px" }}>
-                  {currentRoomTitle}
-                </h5>
-                <div
-                  style={{ color: "#999", fontSize: "13px", marginTop: "2px" }}
-                >
-                  <FaClock style={{ marginRight: "5px" }} />
-                  {formatDuration(callDuration)}
-                </div>
-              </div>
-              <div>
-                <Badge bg="secondary" style={{ fontSize: "13px" }}>
-                  Room: {currentRoomCode}
-                </Badge>
-              </div>
+      {/* MAIN VIDEO */}
+      <div
+        style={{
+          flex: 1,
+          position: "relative",
+          background: "#000",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <video
+          ref={mainVideoRef}
+          autoPlay
+          playsInline
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+          }}
+        />
+
+        {!activeSpeakerId && (
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              textAlign: "center",
+              color: "#fff",
+            }}
+          >
+            <div style={{ fontSize: "80px", marginBottom: "24px", opacity: 0.6 }}>
+              🎥
             </div>
-
-            {/* MAIN VIDEO */}
-            <div
-              style={{
-                flex: 1,
-                position: "relative",
-                background: "#000",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <video
-                ref={mainVideoRef}
-                autoPlay
-                playsInline
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "contain",
-                }}
-              />
-
-              {!activeSpeakerId && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "50%",
-                    left: "50%",
-                    transform: "translate(-50%, -50%)",
-                    textAlign: "center",
-                    color: "#fff",
-                  }}
-                >
-                  <div style={{ fontSize: "64px", marginBottom: "20px" }}>
-                    🎥
-                  </div>
-                  <h4 style={{ marginBottom: "10px" }}>
-                    Waiting for participants...
-                  </h4>
-                  <p style={{ color: "#999" }}>
-                    Others will appear here when they join
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* BOTTOM CONTROLS */}
-            <div
-              style={{
-                background: "#2a2a2a",
-                padding: "20px",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: "15px",
-                borderTop: "1px solid #3a3a3a",
-              }}
-            >
-              <Button
-                onClick={toggleMic}
-                style={{
-                  width: "56px",
-                  height: "56px",
-                  borderRadius: "50%",
-                  background: micOn ? "#4a4a4a" : "#f44336",
-                  border: "none",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {micOn ? (
-                  <FaMicrophone size={20} color="#fff" />
-                ) : (
-                  <FaMicrophoneSlash size={20} color="#fff" />
-                )}
-              </Button>
-
-              <Button
-                onClick={toggleCamera}
-                style={{
-                  width: "56px",
-                  height: "56px",
-                  borderRadius: "50%",
-                  background: cameraOn ? "#4a4a4a" : "#f44336",
-                  border: "none",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {cameraOn ? (
-                  <FaVideo size={20} color="#fff" />
-                ) : (
-                  <FaVideoSlash size={20} color="#fff" />
-                )}
-              </Button>
-
-              <Button
-                style={{
-                  width: "56px",
-                  height: "56px",
-                  borderRadius: "50%",
-                  background: "#4a4a4a",
-                  border: "none",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-                title="Share Screen"
-              >
-                <FaDesktop size={20} color="#fff" />
-              </Button>
-
-              <Button
-                onClick={handleEndCall}
-                style={{
-                  width: "56px",
-                  height: "56px",
-                  borderRadius: "50%",
-                  background: "#f44336",
-                  border: "none",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <FaPhoneSlash size={20} color="#fff" />
-              </Button>
-            </div>
+            <h3 style={{ marginBottom: "12px", fontWeight: "600" }}>
+              Waiting for participants...
+            </h3>
+            <p style={{ color: "#999", fontSize: "16px" }}>
+              Share the room code to get started
+            </p>
           </div>
+        )}
+      </div>
+
+      {/* BOTTOM CONTROLS */}
+      <div
+        style={{
+          background: "linear-gradient(0deg, #1a1a1a 0%, rgba(26, 26, 26, 0.95) 100%)",
+          backdropFilter: "blur(20px)",
+          padding: "24px",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          gap: "16px",
+          borderTop: "1px solid rgba(255,255,255,0.1)",
+          boxShadow: "0 -4px 12px rgba(0,0,0,0.3)",
+        }}
+      >
+        <Button
+          onClick={toggleMic}
+          style={{
+            width: "56px",
+            height: "56px",
+            borderRadius: "50%",
+            background: micOn
+              ? "rgba(255, 255, 255, 0.1)"
+              : "linear-gradient(135deg, #f44336 0%, #d32f2f 100%)",
+            border: micOn ? "2px solid rgba(255,255,255,0.2)" : "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "all 0.3s ease",
+            boxShadow: micOn ? "none" : "0 4px 12px rgba(244, 67, 54, 0.4)",
+          }}
+        >
+          {micOn ? (
+            <FaMicrophone size={20} color="#fff" />
+          ) : (
+            <FaMicrophoneSlash size={20} color="#fff" />
+          )}
+        </Button>
+
+        <Button
+          onClick={toggleCamera}
+          style={{
+            width: "56px",
+            height: "56px",
+            borderRadius: "50%",
+            background: cameraOn
+              ? "rgba(255, 255, 255, 0.1)"
+              : "linear-gradient(135deg, #f44336 0%, #d32f2f 100%)",
+            border: cameraOn ? "2px solid rgba(255,255,255,0.2)" : "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "all 0.3s ease",
+            boxShadow: cameraOn ? "none" : "0 4px 12px rgba(244, 67, 54, 0.4)",
+          }}
+        >
+          {cameraOn ? (
+            <FaVideo size={20} color="#fff" />
+          ) : (
+            <FaVideoSlash size={20} color="#fff" />
+          )}
+        </Button>
+
+        <Button
+          style={{
+            width: "56px",
+            height: "56px",
+            borderRadius: "50%",
+            background: "rgba(255, 255, 255, 0.1)",
+            border: "2px solid rgba(255,255,255,0.2)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          title="Share Screen"
+        >
+          <FaDesktop size={20} color="#fff" />
+        </Button>
+
+        {/* CONDITIONAL BUTTONS: Host shows "End Meeting", Others show "Leave" */}
+        {isHost ? (
+          <Button
+            onClick={handleEndMeeting}
+            style={{
+              width: "auto",
+              height: "56px",
+              borderRadius: "28px",
+              background: "linear-gradient(135deg, #f44336 0%, #d32f2f 100%)",
+              border: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "0 24px",
+              gap: "8px",
+              fontSize: "14px",
+              fontWeight: "600",
+              boxShadow: "0 4px 12px rgba(244, 67, 54, 0.4)",
+            }}
+          >
+            <FaPhoneSlash size={18} />
+            End Meeting
+          </Button>
+        ) : (
+          <Button
+            onClick={handleEndCall}
+            style={{
+              width: "56px",
+              height: "56px",
+              borderRadius: "50%",
+              background: "linear-gradient(135deg, #f44336 0%, #d32f2f 100%)",
+              border: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 4px 12px rgba(244, 67, 54, 0.4)",
+            }}
+            title="Leave Call"
+          >
+            <FaPhoneSlash size={20} color="#fff" />
+          </Button>
+        )}
+      </div>
+    </div>
+
 
           {/* RIGHT SIDEBAR - Chat & People */}
           <div
             style={{
               width: "100%",
-              maxWidth: "320px",
+              maxWidth: "340px",
               background: "#fff",
               display: "flex",
               flexDirection: "column",
+                      borderLeft: "1px solid #e0e0e0",
+
             }}
             className="d-none d-lg-flex"
           >
@@ -1728,6 +1836,9 @@ export default function VideoPage() {
           </div>
         </div>
       )}
+
+
+
       {/* CREATE MEETING MODAL */}
       <Modal show={showCreateModal} onHide={() => setShowCreateModal(false)}>
         <Modal.Header closeButton>
