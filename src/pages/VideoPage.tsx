@@ -1095,7 +1095,8 @@ const handleEndMeeting = async () => {
   return (
     <div
       style={{
-        marginLeft: "0",
+              marginLeft: view === "call" ? "0" : "0", // Remove margin completely when in call
+
         padding: "0",
         minHeight: "100vh",
         background: "#f5f7fa",
@@ -1274,7 +1275,16 @@ const handleEndMeeting = async () => {
 {view === "call" && (
   <div
     className="d-flex flex-column flex-md-row"
-    style={{ height: "100vh", background: "#0f0f0f" }}
+        style={{ 
+      height: "100vh", 
+      background: "#0f0f0f",
+      position: "fixed",    // ✅ Add this
+      top: 0,               // ✅ Add this
+      left: 0,              // ✅ Add this
+      right: 0,             // ✅ Add this
+      bottom: 0,            // ✅ Add this
+      zIndex: 9999          // ✅ Add this - ensures it overlays everything
+    }}
   >
     {/* LEFT SIDEBAR - Participants */}
     <div
@@ -1483,7 +1493,7 @@ const handleEndMeeting = async () => {
       <div
         style={{
           flex: 1,
-          position: "fixed",
+          position: "relative",
           background: "#000",
           display: "flex",
           alignItems: "center",
