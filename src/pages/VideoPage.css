@@ -1,0 +1,33 @@
+/* src/pages/VideoPage.css */
+
+/* Mobile responsiveness for video call */
+@media (max-width: 767px) {
+  /* Hide desktop sidebars on mobile */
+  .video-call-container {
+    flex-direction: column !important;
+  }
+  
+  /* Make video controls wrap on small screens */
+  .video-controls {
+    flex-wrap: wrap;
+    justify-content: center !important;
+  }
+  
+  /* Ensure main video takes full width on mobile */
+  .main-video-container {
+    width: 100% !important;
+  }
+}
+
+/* Tablet and up */
+@media (min-width: 768px) {
+  /* Ensure proper flex layout on desktop */
+  .video-call-container {
+    flex-direction: row !important;
+  }
+}
+
+/* Prevent body scroll when in call */
+body.in-video-call {
+  overflow: hidden;
+}

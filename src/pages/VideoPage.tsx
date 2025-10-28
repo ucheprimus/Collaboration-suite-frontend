@@ -1237,8 +1237,8 @@ socket.on("video:error", ({ message }) => {
           className="d-flex flex-column flex-md-row"
           style={{ height: "100vh", background: "#1a1a1a" }}
         >
-          {/* LEFT SIDEBAR - Participants */}
-        {/* LEFT SIDEBAR - Participants */}
+         
+         {/* LEFT SIDEBAR - Participants */}
           <div
             style={{
               width: "200px",
@@ -1261,7 +1261,7 @@ socket.on("video:error", ({ message }) => {
                 marginBottom: "5px",
               }}
             >
-              Participants ({participants.length})
+              Participants ({participants.length + 1})
             </div>
 
             {/* LOCAL USER */}
