@@ -292,7 +292,8 @@ export default function VideoPage() {
     }
   }, [localStreamRef.current, view, cameraOn]);
 
-useEffect(() => {
+
+  useEffect(() => {
     if (!socket || !roomId) return;
 
     const handleParticipantsUpdate = async (data: { participants: any[] }) => {
@@ -301,35 +302,39 @@ useEffect(() => {
       console.log("   Self socket:", socket?.id);
 
       const enrichedParticipants = await Promise.all(
-        data.participants.map(async (p) => {
-          if (!p.user_name) {
-            const { data: profile } = await supabase
-              .from("profiles")
-              .select("full_name")
-              .eq("id", p.user_id)
-              .single();
+        data.participants
+          .filter(p => p.user_id !== session?.user?.id) // ✅ EXCLUDE SELF
+          .map(async (p) => {
+            if (!p.user_name) {
+              const { data: profile } = await supabase
+                .from("profiles")
+                .select("full_name")
+                .eq("id", p.user_id)
+                .single();
 
-            interface ProfileData {
-              full_name: string;
+              interface ProfileData {
+                full_name: string;
+              }
+              p.user_name = (profile as ProfileData | null)?.full_name || "Guest";
             }
-            p.user_name = (profile as ProfileData | null)?.full_name || "Guest";
-          }
-          
-          const result = {
-            id: p.user_id,
-            user_id: p.user_id,
-            user_name: p.user_name,
-            role: p.role,
-            isSelf: p.user_id === session?.user?.id,
-            socketId: p.socketId || p.user_id,
-          };
-          
-          console.log("   Participant:", result.user_name, "isSelf:", result.isSelf, "socketId:", result.socketId);
-          return result;
-        })
+            
+            const result = {
+              id: p.user_id,
+              user_id: p.user_id,
+              user_name: p.user_name,
+              role: p.role,
+              isSelf: false, // Never self since we filtered
+              socketId: p.socketId || p.user_id,
+            };
+            
+            console.log("   Remote Participant:", result.user_name, "socketId:", result.socketId);
+            return result;
+          })
       );
 
       setParticipants(enrichedParticipants);
+      
+      console.log(`✅ Set ${enrichedParticipants.length} remote participants`);
     };
 
     const handleChatMessage = (data: ChatMessage) => {
@@ -356,7 +361,7 @@ useEffect(() => {
         "Self:",
         session?.user?.id
       );
-      
+
       // ✅ Prevent connecting to yourself
       if (userId === session?.user?.id) {
         console.log("⚠️ Ignoring self join");
@@ -439,20 +444,19 @@ useEffect(() => {
       }
     };
 
-
     // Add this inside your useEffect that listens to socket events
-socket.on("video:room-ended", ({ reason }) => {
-  alert(reason || "Meeting has ended");
-  handleEndCall(); // Your existing end call function
-});
+    socket.on("video:room-ended", ({ reason }) => {
+      alert(reason || "Meeting has ended");
+      handleEndCall(); // Your existing end call function
+    });
 
-// Also add error handler
-socket.on("video:error", ({ message }) => {
-  setError(message);
-  if (message.includes("ended")) {
-    handleEndCall();
-  }
-});
+    // Also add error handler
+    socket.on("video:error", ({ message }) => {
+      setError(message);
+      if (message.includes("ended")) {
+        handleEndCall();
+      }
+    });
 
     socket.on("video:participants-update", handleParticipantsUpdate);
     socket.on("video:chat-message", handleChatMessage);
@@ -842,15 +846,15 @@ socket.on("video:error", ({ message }) => {
         );
 
         for (const participant of otherParticipants) {
-          if (participant.socketId && participant.socketId !== session.user.id) {
-
-
+          if (
+            participant.socketId &&
+            participant.socketId !== session.user.id
+          ) {
             console.log(`🤝 Initiating connection to ${participant.user_name}`);
             await createPeerConnection(participant.socketId, true);
           }
         }
       }, 500); // Give time for participants list to update
-
     } catch (err: any) {
       setError(err?.message || "Failed to join");
     } finally {
@@ -1237,8 +1241,7 @@ socket.on("video:error", ({ message }) => {
           className="d-flex flex-column flex-md-row"
           style={{ height: "100vh", background: "#1a1a1a" }}
         >
-         
-         {/* LEFT SIDEBAR - Participants */}
+          {/* LEFT SIDEBAR - Participants */}
           <div
             style={{
               width: "200px",
