@@ -1403,22 +1403,25 @@ const handleEndMeeting = async () => {
           />
         ))}
 
-      {participants.filter((p) => !p.isSelf).length === 0 && (
-        <div
-          style={{
-            color: "#999",
-            fontSize: "13px",
-            textAlign: "center",
-            marginTop: "32px",
-            padding: "20px",
-            background: "rgba(255,255,255,0.05)",
-            borderRadius: "12px",
-          }}
-        >
-          <div style={{ fontSize: "32px", marginBottom: "8px" }}>👥</div>
-          <div>Waiting for others to join...</div>
-        </div>
-      )}
+{participants.filter((p) => !p.isSelf).length === 0 && (
+  <div style={{
+    color: "#999",
+    fontSize: "12px",
+    textAlign: "center",
+    marginTop: "20px",
+    padding: "16px",
+    background: "rgba(255,255,255,0.03)",
+    borderRadius: "12px",
+    border: "1px dashed rgba(255,255,255,0.1)",
+  }}>
+    <div style={{ fontSize: "24px", marginBottom: "8px", opacity: 0.5 }}>⏳</div>
+    <div>Invite others to join</div>
+    <div style={{ fontSize: "11px", marginTop: "4px", opacity: 0.6 }}>
+      Share code: <strong>{currentRoomCode}</strong>
+    </div>
+  </div>
+)}
+
     </div>
 
     {/* CENTER - Main Video */}
@@ -1480,11 +1483,13 @@ const handleEndMeeting = async () => {
       <div
         style={{
           flex: 1,
-          position: "relative",
+          position: "fixed",
           background: "#000",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+                zIndex: 9999, // ✅ Ensure it's on top
+
         }}
       >
         <video
@@ -1674,8 +1679,7 @@ const handleEndMeeting = async () => {
                     eventKey="people"
                     style={{ textAlign: "center", fontSize: "14px" }}
                   >
-                    <FaUsers style={{ marginRight: "5px" }} /> People (
-                    {participants.length})
+                    <FaUsers style={{ marginRight: "5px" }} /> People ({participants.length + 1})
                   </Nav.Link>
                 </Nav.Item>
               </Nav>
@@ -1770,6 +1774,45 @@ const handleEndMeeting = async () => {
                   eventKey="people"
                   style={{ flex: 1, overflowY: "auto", padding: "15px" }}
                 >
+                  <div>
+    {/* ✅ ADD THIS: Show yourself FIRST */}
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        padding: "10px",
+        borderBottom: "1px solid #f0f0f0",
+        background: "rgba(76, 175, 80, 0.1)",
+      }}
+    >
+      <div
+        style={{
+          width: "40px",
+          height: "40px",
+          borderRadius: "50%",
+          background: "linear-gradient(135deg, #4CAF50 0%, #45a049 100%)",
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          marginRight: "12px",
+          fontSize: "16px",
+          fontWeight: "600",
+        }}
+      >
+        {session?.user?.user_metadata?.full_name?.[0]?.toUpperCase() || "Y"}
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: "14px", fontWeight: "600" }}>
+          You {isHost && "👑"}
+        </div>
+        {isHost && (
+          <Badge bg="success" style={{ fontSize: "10px", marginTop: "2px" }}>
+            Host
+          </Badge>
+        )}
+      </div>
+    </div>
                   {participants.length === 0 ? (
                     <p
                       style={{
