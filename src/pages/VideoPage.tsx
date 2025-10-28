@@ -1238,9 +1238,11 @@ socket.on("video:error", ({ message }) => {
           style={{ height: "100vh", background: "#1a1a1a" }}
         >
           {/* LEFT SIDEBAR - Participants */}
+        {/* LEFT SIDEBAR - Participants */}
           <div
             style={{
-              width: "100%",
+              width: "200px",
+              minWidth: "200px",
               maxWidth: "200px",
               background: "#2a2a2a",
               overflowY: "auto",
@@ -1271,7 +1273,8 @@ socket.on("video:error", ({ message }) => {
                 border: "2px solid #4CAF50",
                 background: "#000",
                 cursor: "pointer",
-                aspectRatio: "4/3",
+                width: "100%",
+                height: "120px",
               }}
             >
               <video
