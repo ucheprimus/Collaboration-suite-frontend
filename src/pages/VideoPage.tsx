@@ -117,15 +117,12 @@ export default function VideoPage() {
 
   const [sessionReady, setSessionReady] = useState(false);
 
-
-  
-            useEffect(() => {
-  if (notification) {
-    const timer = setTimeout(() => setNotification(null), 4000);
-    return () => clearTimeout(timer);
-  }
-}, [notification]);
-
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   useEffect(() => {
     if (view === "call" && !callStartTimeRef.current) {
@@ -372,12 +369,12 @@ export default function VideoPage() {
       socketId: string;
       userName?: string;
     }) => {
-     console.log("\n🎉 USER JOINED EVENT");
-  console.log(`   User: ${userName} (${userId})`);
-  console.log(`   Socket: ${socketId}`);
-  console.log(`   My ID: ${session?.user?.id}`);
-  console.log(`   My Socket: ${socket?.id}`);
-  console.log(`   Current peers: ${peersRef.current.size}`);
+      console.log("\n🎉 USER JOINED EVENT");
+      console.log(`   User: ${userName} (${userId})`);
+      console.log(`   Socket: ${socketId}`);
+      console.log(`   My ID: ${session?.user?.id}`);
+      console.log(`   My Socket: ${socket?.id}`);
+      console.log(`   Current peers: ${peersRef.current.size}`);
 
       // ✅ Prevent connecting to yourself
       if (userId === session?.user?.id) {
@@ -385,25 +382,38 @@ export default function VideoPage() {
         return;
       }
 
+      // ✅ Show notification
+      setNotification(`${userName || "Someone"} joined the meeting`);
 
-  // ✅ Show notification
-  setNotification(`${userName || "Someone"} joined the meeting`);
+      // ✅ Close existing peer before creating new one
+      if (peersRef.current.has(socketId)) {
+        console.log("♻️ Closing existing peer for", socketId);
+        const oldPeer = peersRef.current.get(socketId);
+        oldPeer?.close();
+        peersRef.current.delete(socketId);
+      }
 
-// ✅ Close existing peer before creating new one
-if (peersRef.current.has(socketId)) {
-  console.log("♻️ Closing existing peer for", socketId);
-  const oldPeer = peersRef.current.get(socketId);
-  oldPeer?.close();
-  peersRef.current.delete(socketId);
-}
-
-
-  console.log("📞 Creating NEW peer connection for:", userName);
-  await createPeerConnection(socketId, true);
-  console.log(`✅ Peer created. Total peers: ${peersRef.current.size}\n`);
+        // ✅ ADD THIS: Update participants list immediately
+  setParticipants((prev) => {
+    // Check if already exists
+    if (prev.some(p => p.socketId === socketId)) {
+      return prev;
+    }
+    // Add new participant
+    return [...prev, {
+      id: userId,
+      user_id: userId,
+      user_name: userName || "Guest",
+      role: "guest",
+      isSelf: false,
+      socketId: socketId,
+    }];
+  });
+  
+      console.log("📞 Creating NEW peer connection for:", userName);
+      await createPeerConnection(socketId, true);
+      console.log(`✅ Peer created. Total peers: ${peersRef.current.size}\n`);
     };
-
-    
 
     const handleOffer = async ({
       offer,
@@ -456,13 +466,18 @@ if (peersRef.current.has(socketId)) {
       }
     };
 
-const handleUserLeft = ({ socketId, userName }: { socketId: string; userName?: string }) => {
-  console.log("👋 User left:", socketId);
-  
-  // ✅ Show notification
-  setNotification(`${userName || "Someone"} left the meeting`);
+    const handleUserLeft = ({
+      socketId,
+      userName,
+    }: {
+      socketId: string;
+      userName?: string;
+    }) => {
+      console.log("👋 User left:", socketId);
 
-      
+      // ✅ Show notification
+      setNotification(`${userName || "Someone"} left the meeting`);
+
       const peer = peersRef.current.get(socketId);
       if (peer) {
         peer.close();
@@ -478,8 +493,7 @@ const handleUserLeft = ({ socketId, userName }: { socketId: string; userName?: s
 
     socket.on("video:meeting-ended", ({ reason }) => {
       alert(reason || "Meeting ended by  host");
-        setTimeout(() => handleEndCall(), 2000);
-
+      setTimeout(() => handleEndCall(), 2000);
     });
 
     // Add this inside your useEffect that listens to socket events
@@ -620,98 +634,103 @@ const handleUserLeft = ({ socketId, userName }: { socketId: string; userName?: s
     }
   };
 
-const createPeerConnection = async (
-  socketId: string,
-  isInitiator: boolean
-): Promise<RTCPeerConnection> => {
-  console.log("🔧 Creating peer connection:", {
-    socketId,
-    isInitiator,
-    hasLocal: !!localStreamRef.current,
-    localTracks: localStreamRef.current?.getTracks().length,
-  });
+  const createPeerConnection = async (
+    socketId: string,
+    isInitiator: boolean
+  ): Promise<RTCPeerConnection> => {
+    console.log("🔧 Creating peer connection:", {
+      socketId,
+      isInitiator,
+      hasLocal: !!localStreamRef.current,
+      localTracks: localStreamRef.current?.getTracks().length,
+    });
 
-  if (peersRef.current.has(socketId)) {
-    console.log("♻️ Reusing existing peer for:", socketId);
-    return peersRef.current.get(socketId)!;
-  }
-
-  const peer = new RTCPeerConnection({
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun.services.mozilla.com:3478" },
-    ],
-  });
-
-  peer.onicecandidate = (e) => {
-    if (e.candidate && socket) {
-      console.log("❄️ Sending ICE candidate to:", socketId);
-      socket.emit("webrtc:ice-candidate", {
-        roomId,
-        candidate: e.candidate,
-        to: socketId,
-      });
+    if (peersRef.current.has(socketId)) {
+      console.log("♻️ Reusing existing peer for:", socketId);
+      return peersRef.current.get(socketId)!;
     }
-  };
 
-  peer.ontrack = (e) => {
-    console.log("📡 Received track from:", socketId, e.track.kind);
-    const stream = e.streams[0];
+    const peer = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun.services.mozilla.com:3478" },
+      ],
+    });
 
-    setParticipants((prev) => {
-      const updated = prev.map((p) =>
-        p.socketId === socketId ? { ...p, stream } : p
-      );
-
-      // ✅ Auto-show first remote stream on main video
-      if (!activeSpeakerId && mainVideoRef.current) {
-        console.log("📺 Setting main video to:", socketId);
-        setTimeout(() => {
-          if (mainVideoRef.current) {
-            mainVideoRef.current.srcObject = stream;
-            mainVideoRef.current.play().catch(err => console.error("Main video play error:", err));
-            setActiveSpeakerId(socketId);
-          }
-        }, 100);
+    peer.onicecandidate = (e) => {
+      if (e.candidate && socket) {
+        console.log("❄️ Sending ICE candidate to:", socketId);
+        socket.emit("webrtc:ice-candidate", {
+          roomId,
+          candidate: e.candidate,
+          to: socketId,
+        });
       }
+    };
 
-      return updated;
-    });
-  };
+    peer.ontrack = (e) => {
+      console.log("📡 Received track from:", socketId, e.track.kind);
+      const stream = e.streams[0];
 
-  peer.onconnectionstatechange = () => {
-    console.log(`🔗 Peer ${socketId} state:`, peer.connectionState);
-    if (peer.connectionState === "failed" || peer.connectionState === "disconnected") {
-      console.warn(`❌ Peer ${socketId} connection failed/disconnected`);
-      peer.close();
-      peersRef.current.delete(socketId);
-    } else if (peer.connectionState === "connected") {
-      console.log(`✅ Peer ${socketId} successfully connected!`);
+      setParticipants((prev) => {
+        const updated = prev.map((p) =>
+          p.socketId === socketId ? { ...p, stream } : p
+        );
+
+        // ✅ Auto-show first remote stream on main video
+        if (!activeSpeakerId && mainVideoRef.current) {
+          console.log("📺 Setting main video to:", socketId);
+          setTimeout(() => {
+            if (mainVideoRef.current) {
+              mainVideoRef.current.srcObject = stream;
+              mainVideoRef.current
+                .play()
+                .catch((err) => console.error("Main video play error:", err));
+              setActiveSpeakerId(socketId);
+            }
+          }, 100);
+        }
+
+        return updated;
+      });
+    };
+
+    peer.onconnectionstatechange = () => {
+      console.log(`🔗 Peer ${socketId} state:`, peer.connectionState);
+      if (
+        peer.connectionState === "failed" ||
+        peer.connectionState === "disconnected"
+      ) {
+        console.warn(`❌ Peer ${socketId} connection failed/disconnected`);
+        peer.close();
+        peersRef.current.delete(socketId);
+      } else if (peer.connectionState === "connected") {
+        console.log(`✅ Peer ${socketId} successfully connected!`);
+      }
+    };
+
+    // ✅ ADD TRACKS FROM LOCAL STREAM
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        console.log(`➕ Adding ${track.kind} track to peer ${socketId}`);
+        peer.addTrack(track, localStreamRef.current!);
+      });
+    } else {
+      console.error("❌ No local stream to add tracks from!");
     }
+
+    peersRef.current.set(socketId, peer);
+
+    if (isInitiator) {
+      console.log("📤 Creating and sending offer to:", socketId);
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      socket?.emit("webrtc:offer", { roomId, offer, to: socketId });
+    }
+
+    return peer;
   };
-
-  // ✅ ADD TRACKS FROM LOCAL STREAM
-  if (localStreamRef.current) {
-    localStreamRef.current.getTracks().forEach((track) => {
-      console.log(`➕ Adding ${track.kind} track to peer ${socketId}`);
-      peer.addTrack(track, localStreamRef.current!);
-    });
-  } else {
-    console.error("❌ No local stream to add tracks from!");
-  }
-
-  peersRef.current.set(socketId, peer);
-
-  if (isInitiator) {
-    console.log("📤 Creating and sending offer to:", socketId);
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    socket?.emit("webrtc:offer", { roomId, offer, to: socketId });
-  }
-
-  return peer;
-};
 
   const createRoomInSupabase = async () => {
     if (!session?.user?.id) return null;
@@ -872,31 +891,38 @@ const createPeerConnection = async (
       setView("call");
 
       // Around line 820 - Update the setTimeout block in joinRoom
-setTimeout(async () => {
-  if (localVideoRef.current && localStreamRef.current) {
-    localVideoRef.current.srcObject = localStreamRef.current;
-    localVideoRef.current
-      .play()
-      .catch((err) => console.error("Local video play error:", err));
-  }
+      setTimeout(async () => {
+        if (localVideoRef.current && localStreamRef.current) {
+          localVideoRef.current.srcObject = localStreamRef.current;
+          localVideoRef.current
+            .play()
+            .catch((err) => console.error("Local video play error:", err));
+        }
 
- 
-    console.log(`🔗 Creating initial peer connections for ${participants.length} participants...`);
+        console.log(
+          `🔗 Creating initial peer connections for ${participants.length} participants...`
+        );
 
+        for (const participant of participants) {
+          if (!participant.isSelf && participant.socketId) {
+            console.log(
+              `📞 Creating initial peer for: ${participant.user_name} (${participant.socketId})`
+            );
+            try {
+              await createPeerConnection(participant.socketId, true);
+            } catch (err) {
+              console.error(
+                `Failed to create peer for ${participant.socketId}:`,
+                err
+              );
+            }
+          }
+        }
 
-  for (const participant of participants) {
-    if (!participant.isSelf && participant.socketId) {
-      console.log(`📞 Creating initial peer for: ${participant.user_name} (${participant.socketId})`);
-      try {
-        await createPeerConnection(participant.socketId, true);
-      } catch (err) {
-        console.error(`Failed to create peer for ${participant.socketId}:`, err);
-      }
-    }
-  }
-
-  console.log(`✅ Initial peer setup complete. Created ${peersRef.current.size} peers`);
-}, 1000);
+        console.log(
+          `✅ Initial peer setup complete. Created ${peersRef.current.size} peers`
+        );
+      }, 1000);
     } catch (err: any) {
       setError(err?.message || "Failed to join");
     } finally {
@@ -1142,7 +1168,6 @@ setTimeout(async () => {
     );
   }
 
-
   return (
     <div
       style={{
@@ -1384,24 +1409,26 @@ setTimeout(async () => {
             </div>
           </div>
 
-           {/* ✅ NOTIFICATION - CORRECT PLACEMENT */}
-    {notification && (
-      <div style={{
-        position: "fixed",
-        top: "80px",
-        left: "50%",
-        transform: "translateX(-50%)",
-        background: "rgba(0,0,0,0.85)",
-        color: "#fff",
-        padding: "12px 24px",
-        borderRadius: "8px",
-        zIndex: 10001,
-        fontSize: "14px",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-      }}>
-        {notification}
-      </div>
-    )}
+          {/* ✅ NOTIFICATION - CORRECT PLACEMENT */}
+          {notification && (
+            <div
+              style={{
+                position: "fixed",
+                top: "80px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                background: "rgba(0,0,0,0.85)",
+                color: "#fff",
+                padding: "12px 24px",
+                borderRadius: "8px",
+                zIndex: 10001,
+                fontSize: "14px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+              }}
+            >
+              {notification}
+            </div>
+          )}
 
           {/* MAIN CONTENT - Video + Sidebar */}
           <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
@@ -1887,73 +1914,71 @@ setTimeout(async () => {
               <FaDesktop size={18} color="#fff" />
             </Button>
 
-            
-             {/* ✅ HOST GETS BOTH BUTTONS */}
-  {isHost ? (
-    <>
-      <Button
-        onClick={handleEndCall}
-        style={{
-          height: "48px",
-          borderRadius: "24px",
-          background: "rgba(255,255,255,0.15)",
-          border: "1px solid rgba(255,255,255,0.3)",
-          padding: "0 20px",
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          fontSize: "14px",
-          fontWeight: "600",
-          color: "#fff",
-        }}
-        title="Leave (Meeting continues)"
-      >
-        <FaPhoneSlash size={16} />
-        Leave
-      </Button>
-      
-      <Button
-        onClick={handleEndMeeting}
-        style={{
-          height: "48px",
-          borderRadius: "24px",
-          background: "#dc3545",
-          border: "none",
-          padding: "0 20px",
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          fontSize: "14px",
-          fontWeight: "600",
-        }}
-        title="End meeting for everyone"
-      >
-        <FaPhoneSlash size={16} />
-        End Meeting
-      </Button>
-    </>
-  ) : (
+            {/* ✅ HOST GETS BOTH BUTTONS */}
+            {isHost ? (
+              <>
+                <Button
+                  onClick={handleEndCall}
+                  style={{
+                    height: "48px",
+                    borderRadius: "24px",
+                    background: "rgba(255,255,255,0.15)",
+                    border: "1px solid rgba(255,255,255,0.3)",
+                    padding: "0 20px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                    color: "#fff",
+                  }}
+                  title="Leave (Meeting continues)"
+                >
+                  <FaPhoneSlash size={16} />
+                  Leave
+                </Button>
 
-    /* ✅ GUESTS ONLY GET LEAVE */
-    <Button
-      onClick={handleEndCall}
-      style={{
-        height: "48px",
-        borderRadius: "24px",
-        background: "#dc3545",
-        border: "none",
-        padding: "0 20px",
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        fontSize: "14px",
-        fontWeight: "600",
-      }}
-      title="Leave Call"
-    >
-      <FaPhoneSlash size={16} />
-      Leave Call
-    </Button>
+                <Button
+                  onClick={handleEndMeeting}
+                  style={{
+                    height: "48px",
+                    borderRadius: "24px",
+                    background: "#dc3545",
+                    border: "none",
+                    padding: "0 20px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                  }}
+                  title="End meeting for everyone"
+                >
+                  <FaPhoneSlash size={16} />
+                  End Meeting
+                </Button>
+              </>
+            ) : (
+              /* ✅ GUESTS ONLY GET LEAVE */
+              <Button
+                onClick={handleEndCall}
+                style={{
+                  height: "48px",
+                  borderRadius: "24px",
+                  background: "#dc3545",
+                  border: "none",
+                  padding: "0 20px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  fontSize: "14px",
+                  fontWeight: "600",
+                }}
+                title="Leave Call"
+              >
+                <FaPhoneSlash size={16} />
+                Leave Call
+              </Button>
             )}
           </div>
         </div>
