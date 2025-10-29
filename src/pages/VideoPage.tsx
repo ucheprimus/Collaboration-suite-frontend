@@ -117,6 +117,16 @@ export default function VideoPage() {
 
   const [sessionReady, setSessionReady] = useState(false);
 
+
+  
+            useEffect(() => {
+  if (notification) {
+    const timer = setTimeout(() => setNotification(null), 4000);
+    return () => clearTimeout(timer);
+  }
+}, [notification]);
+
+
   useEffect(() => {
     if (view === "call" && !callStartTimeRef.current) {
       callStartTimeRef.current = Date.now();
@@ -1126,35 +1136,6 @@ const createPeerConnection = async (
     );
   }
 
-            useEffect(() => {
-  if (notification) {
-    const timer = setTimeout(() => setNotification(null), 4000);
-    return () => clearTimeout(timer);
-  }
-}, [notification]);
-
-
-
-
-{notification && (
-  <div style={{
-    position: "fixed",
-    top: "80px",
-    left: "50%",
-    transform: "translateX(-50%)",
-    background: "rgba(0,0,0,0.85)",
-    color: "#fff",
-    padding: "12px 24px",
-    borderRadius: "8px",
-    zIndex: 10001,
-    fontSize: "14px",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-  }}>
-    {notification}
-
-    
-  </div>
-)}
 
   return (
     <div
