@@ -372,14 +372,12 @@ export default function VideoPage() {
       socketId: string;
       userName?: string;
     }) => {
-      console.log(
-        "🎉 User joined:",
-        userName || userId,
-        "socket:",
-        socketId,
-        "Self:",
-        session?.user?.id
-      );
+     console.log("\n🎉 USER JOINED EVENT");
+  console.log(`   User: ${userName} (${userId})`);
+  console.log(`   Socket: ${socketId}`);
+  console.log(`   My ID: ${session?.user?.id}`);
+  console.log(`   My Socket: ${socket?.id}`);
+  console.log(`   Current peers: ${peersRef.current.size}`);
 
       // ✅ Prevent connecting to yourself
       if (userId === session?.user?.id) {
@@ -398,8 +396,9 @@ export default function VideoPage() {
       }
 
 
-      console.log("📞 Creating peer connection for:", userName || socketId);
-      await createPeerConnection(socketId, true);
+  console.log("📞 Creating NEW peer connection for:", userName);
+  await createPeerConnection(socketId, true);
+  console.log(`✅ Peer created. Total peers: ${peersRef.current.size}\n`);
     };
 
     
@@ -870,27 +869,30 @@ const createPeerConnection = async (
       setCurrentRoomTitle(room.title);
       setView("call");
 
-      setTimeout(async () => {
-        if (localVideoRef.current && localStreamRef.current) {
-          localVideoRef.current.srcObject = localStreamRef.current;
-          localVideoRef.current
-            .play()
-            .catch((err) => console.error("Local video play error:", err));
-        }
+      // Around line 820 - Update the setTimeout block in joinRoom
+setTimeout(async () => {
+  if (localVideoRef.current && localStreamRef.current) {
+    localVideoRef.current.srcObject = localStreamRef.current;
+    localVideoRef.current
+      .play()
+      .catch((err) => console.error("Local video play error:", err));
+  }
 
-        const otherParticipants = participants.filter(
-          (p) => !p.isSelf && p.socketId !== socket.id
-        );
+  // ✅ FIX: Get fresh socket list and create peers for ALL OTHER participants
+  const socketsInRoom = await io.in(roomId).allSockets();
+  console.log(`🔗 Creating initial peer connections...`);
+  console.log(`   Found ${socketsInRoom.size} sockets in room`);
 
-        for (const participant of otherParticipants) {
-          if (
-            participant.socketId &&
-            participant.socketId !== session.user.id
-          ) {
-            await createPeerConnection(participant.socketId, true);
-          }
-        }
-      }, 500);
+  // Create peer connections for all participants we received
+  for (const participant of participants) {
+    if (!participant.isSelf && participant.socketId && participant.socketId !== socket?.id) {
+      console.log(`📞 Creating initial peer for: ${participant.user_name} (${participant.socketId})`);
+      await createPeerConnection(participant.socketId, true);
+    }
+  }
+
+  console.log(`✅ Initial peer setup complete. Created ${peersRef.current.size} peers`);
+}, 500);
     } catch (err: any) {
       setError(err?.message || "Failed to join");
     } finally {
