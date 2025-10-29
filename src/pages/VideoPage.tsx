@@ -389,11 +389,13 @@ export default function VideoPage() {
   // ✅ Show notification
   setNotification(`${userName || "Someone"} joined the meeting`);
 
-      // ✅ Prevent duplicate connections
-      if (peersRef.current.has(socketId)) {
-        console.log("♻️ Already connected to", socketId);
-        return;
-      }
+// ✅ Close existing peer before creating new one
+if (peersRef.current.has(socketId)) {
+  console.log("♻️ Closing existing peer for", socketId);
+  const oldPeer = peersRef.current.get(socketId);
+  oldPeer?.close();
+  peersRef.current.delete(socketId);
+}
 
 
   console.log("📞 Creating NEW peer connection for:", userName);
@@ -878,21 +880,23 @@ setTimeout(async () => {
       .catch((err) => console.error("Local video play error:", err));
   }
 
-  // ✅ FIX: Get fresh socket list and create peers for ALL OTHER participants
-  const socketsInRoom = await io.in(roomId).allSockets();
-  console.log(`🔗 Creating initial peer connections...`);
-  console.log(`   Found ${socketsInRoom.size} sockets in room`);
+ 
+    console.log(`🔗 Creating initial peer connections for ${participants.length} participants...`);
 
-  // Create peer connections for all participants we received
+
   for (const participant of participants) {
-    if (!participant.isSelf && participant.socketId && participant.socketId !== socket?.id) {
+    if (!participant.isSelf && participant.socketId) {
       console.log(`📞 Creating initial peer for: ${participant.user_name} (${participant.socketId})`);
-      await createPeerConnection(participant.socketId, true);
+      try {
+        await createPeerConnection(participant.socketId, true);
+      } catch (err) {
+        console.error(`Failed to create peer for ${participant.socketId}:`, err);
+      }
     }
   }
 
   console.log(`✅ Initial peer setup complete. Created ${peersRef.current.size} peers`);
-}, 500);
+}, 1000);
     } catch (err: any) {
       setError(err?.message || "Failed to join");
     } finally {
