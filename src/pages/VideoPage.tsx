@@ -113,6 +113,8 @@ export default function VideoPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const callStartTimeRef = useRef<number | null>(null);
 
+  const [notification, setNotification] = useState<string | null>(null);
+
   const [sessionReady, setSessionReady] = useState(false);
 
   useEffect(() => {
@@ -375,15 +377,22 @@ export default function VideoPage() {
         return;
       }
 
+
+  // ✅ Show notification
+  setNotification(`${userName || "Someone"} joined the meeting`);
+
       // ✅ Prevent duplicate connections
       if (peersRef.current.has(socketId)) {
         console.log("♻️ Already connected to", socketId);
         return;
       }
 
+
       console.log("📞 Creating peer connection for:", userName || socketId);
       await createPeerConnection(socketId, true);
     };
+
+    
 
     const handleOffer = async ({
       offer,
@@ -436,8 +445,13 @@ export default function VideoPage() {
       }
     };
 
-    const handleUserLeft = ({ socketId }: { socketId: string }) => {
-      console.log("👋 User left:", socketId);
+const handleUserLeft = ({ socketId, userName }: { socketId: string; userName?: string }) => {
+  console.log("👋 User left:", socketId);
+  
+  // ✅ Show notification
+  setNotification(`${userName || "Someone"} left the meeting`);
+
+      
       const peer = peersRef.current.get(socketId);
       if (peer) {
         peer.close();
@@ -452,8 +466,9 @@ export default function VideoPage() {
     };
 
     socket.on("video:meeting-ended", ({ reason }) => {
-      alert(reason || "Meeting has been ended by the host");
-      handleEndCall();
+      alert(reason || "Meeting ended by  host");
+        setTimeout(() => handleEndCall(), 2000);
+
     });
 
     // Add this inside your useEffect that listens to socket events
@@ -594,86 +609,98 @@ export default function VideoPage() {
     }
   };
 
-  const createPeerConnection = async (
-    socketId: string,
-    isInitiator: boolean
-  ): Promise<RTCPeerConnection> => {
-    console.log("🔧 Creating peer connection:", {
-      socketId,
-      isInitiator,
-      hasLocal: !!localStreamRef.current,
-    });
+const createPeerConnection = async (
+  socketId: string,
+  isInitiator: boolean
+): Promise<RTCPeerConnection> => {
+  console.log("🔧 Creating peer connection:", {
+    socketId,
+    isInitiator,
+    hasLocal: !!localStreamRef.current,
+    localTracks: localStreamRef.current?.getTracks().length,
+  });
 
-    if (peersRef.current.has(socketId)) {
-      console.log("♻️ Reusing existing peer for:", socketId);
+  if (peersRef.current.has(socketId)) {
+    console.log("♻️ Reusing existing peer for:", socketId);
+    return peersRef.current.get(socketId)!;
+  }
 
-      return peersRef.current.get(socketId)!;
-    }
+  const peer = new RTCPeerConnection({
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun.services.mozilla.com:3478" },
+    ],
+  });
 
-    const peer = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-      ],
-    });
-
-    peer.onicecandidate = (e) => {
-      if (e.candidate && socket) {
-        socket.emit("webrtc:ice-candidate", {
-          roomId,
-          candidate: e.candidate,
-          to: socketId,
-        });
-      }
-    };
-
-    peer.ontrack = (e) => {
-      const stream = e.streams[0];
-
-      setParticipants((prev) => {
-        const updated = prev.map((p) =>
-          p.socketId === socketId ? { ...p, stream } : p
-        );
-
-        if (!activeSpeakerId && mainVideoRef.current) {
-          setTimeout(() => {
-            if (mainVideoRef.current) {
-              mainVideoRef.current.srcObject = stream;
-              setActiveSpeakerId(socketId);
-            }
-          }, 100);
-        }
-
-        return updated;
-      });
-    };
-
-    peer.onconnectionstatechange = () => {
-      if (
-        peer.connectionState === "failed" ||
-        peer.connectionState === "disconnected"
-      ) {
-        peer.close();
-        peersRef.current.delete(socketId);
-      }
-    };
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => {
-        peer.addTrack(track, localStreamRef.current!);
+  peer.onicecandidate = (e) => {
+    if (e.candidate && socket) {
+      console.log("❄️ Sending ICE candidate to:", socketId);
+      socket.emit("webrtc:ice-candidate", {
+        roomId,
+        candidate: e.candidate,
+        to: socketId,
       });
     }
-
-    peersRef.current.set(socketId, peer);
-
-    if (isInitiator) {
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      socket?.emit("webrtc:offer", { roomId, offer, to: socketId });
-    }
-
-    return peer;
   };
+
+  peer.ontrack = (e) => {
+    console.log("📡 Received track from:", socketId, e.track.kind);
+    const stream = e.streams[0];
+
+    setParticipants((prev) => {
+      const updated = prev.map((p) =>
+        p.socketId === socketId ? { ...p, stream } : p
+      );
+
+      // ✅ Auto-show first remote stream on main video
+      if (!activeSpeakerId && mainVideoRef.current) {
+        console.log("📺 Setting main video to:", socketId);
+        setTimeout(() => {
+          if (mainVideoRef.current) {
+            mainVideoRef.current.srcObject = stream;
+            mainVideoRef.current.play().catch(err => console.error("Main video play error:", err));
+            setActiveSpeakerId(socketId);
+          }
+        }, 100);
+      }
+
+      return updated;
+    });
+  };
+
+  peer.onconnectionstatechange = () => {
+    console.log(`🔗 Peer ${socketId} state:`, peer.connectionState);
+    if (peer.connectionState === "failed" || peer.connectionState === "disconnected") {
+      console.warn(`❌ Peer ${socketId} connection failed/disconnected`);
+      peer.close();
+      peersRef.current.delete(socketId);
+    } else if (peer.connectionState === "connected") {
+      console.log(`✅ Peer ${socketId} successfully connected!`);
+    }
+  };
+
+  // ✅ ADD TRACKS FROM LOCAL STREAM
+  if (localStreamRef.current) {
+    localStreamRef.current.getTracks().forEach((track) => {
+      console.log(`➕ Adding ${track.kind} track to peer ${socketId}`);
+      peer.addTrack(track, localStreamRef.current!);
+    });
+  } else {
+    console.error("❌ No local stream to add tracks from!");
+  }
+
+  peersRef.current.set(socketId, peer);
+
+  if (isInitiator) {
+    console.log("📤 Creating and sending offer to:", socketId);
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    socket?.emit("webrtc:offer", { roomId, offer, to: socketId });
+  }
+
+  return peer;
+};
 
   const createRoomInSupabase = async () => {
     if (!session?.user?.id) return null;
@@ -1099,6 +1126,36 @@ export default function VideoPage() {
     );
   }
 
+            useEffect(() => {
+  if (notification) {
+    const timer = setTimeout(() => setNotification(null), 4000);
+    return () => clearTimeout(timer);
+  }
+}, [notification]);
+
+
+
+
+{notification && (
+  <div style={{
+    position: "fixed",
+    top: "80px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    background: "rgba(0,0,0,0.85)",
+    color: "#fff",
+    padding: "12px 24px",
+    borderRadius: "8px",
+    zIndex: 10001,
+    fontSize: "14px",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+  }}>
+    {notification}
+
+    
+  </div>
+)}
+
   return (
     <div
       style={{
@@ -1277,428 +1334,643 @@ export default function VideoPage() {
         </Container>
       )}
 
-{view === "call" && (
-  <div
-    style={{ 
-      position: "fixed",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      zIndex: 10000,
-      background: "#000",
-      display: "flex",
-      flexDirection: "column",
-    }}
-  >
-    {/* TOP BAR */}
-    <div style={{
-      background: "rgba(0,0,0,0.8)",
-      padding: "12px 24px",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      borderBottom: "1px solid rgba(255,255,255,0.1)",
-    }}>
-      <div>
-        <h5 style={{ color: "#fff", margin: 0, fontSize: "16px" }}>
-          {currentRoomTitle}
-        </h5>
-        <div style={{ color: "#999", fontSize: "12px", marginTop: "4px" }}>
-          <FaClock style={{ marginRight: "6px" }} />
-          {formatDuration(callDuration)}
-          {isHost && <Badge bg="success" style={{ marginLeft: "8px", fontSize: "10px" }}>HOST</Badge>}
-        </div>
-      </div>
-      
-      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-        <Badge bg="secondary" style={{ padding: "6px 12px" }}>
-          Room: {currentRoomCode}
-        </Badge>
-        <Button size="sm" variant="link" onClick={() => copyRoomCode(currentRoomCode || "")}>
-          {copiedCode === currentRoomCode ? <FaCheck color="#4CAF50" /> : <FaCopy />}
-        </Button>
-      </div>
-    </div>
-
-    {/* MAIN CONTENT - Video + Sidebar */}
-    <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-      
-      {/* LEFT - Main Video Area */}
-      <div style={{ flex: 1, position: "relative", background: "#000" }}>
-        
-        {/* Main Speaker Video */}
-        <video
-          ref={mainVideoRef}
-          autoPlay
-          playsInline
+      {view === "call" && (
+        <div
           style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "contain",
-          }}
-        />
-
-        {!activeSpeakerId && (
-          <div style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            textAlign: "center",
-            color: "#fff",
-          }}>
-            <div style={{ fontSize: "60px", marginBottom: "16px", opacity: 0.4 }}>🎥</div>
-            <h3 style={{ marginBottom: "8px", fontWeight: "500", fontSize: "20px" }}>
-              Waiting for participants...
-            </h3>
-            <p style={{ color: "#999", fontSize: "14px" }}>
-              Share room code: <strong>{currentRoomCode}</strong>
-            </p>
-          </div>
-        )}
-
-        {/* Bottom Participant Thumbnails */}
-        <div style={{
-          position: "absolute",
-          bottom: "80px",
-          left: "20px",
-          display: "flex",
-          gap: "12px",
-          flexWrap: "wrap",
-          maxWidth: "calc(100% - 40px)",
-        }}>
-          {/* Your Video */}
-          <div style={{
-            width: "180px",
-            height: "120px",
-            borderRadius: "12px",
-            overflow: "hidden",
-            border: "2px solid #4CAF50",
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 10000,
             background: "#000",
-            position: "relative",
-          }}>
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                display: cameraOn ? "block" : "none",
-              }}
-            />
-            {!cameraOn && (
-              <div style={{
-                width: "100%",
-                height: "100%",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-              }}>
-                <div style={{
-                  width: "40px",
-                  height: "40px",
-                  borderRadius: "50%",
-                  background: "rgba(255,255,255,0.25)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "18px",
-                  color: "#fff",
-                  fontWeight: "600",
-                }}>
-                  {session?.user?.user_metadata?.full_name?.[0]?.toUpperCase() || "Y"}
-                </div>
-              </div>
-            )}
-            <div style={{
-              position: "absolute",
-              bottom: "6px",
-              left: "6px",
-              right: "6px",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {/* TOP BAR */}
+          <div
+            style={{
               background: "rgba(0,0,0,0.8)",
-              color: "#fff",
-              padding: "4px 8px",
-              borderRadius: "6px",
-              fontSize: "11px",
-              fontWeight: "600",
+              padding: "12px 24px",
               display: "flex",
               justifyContent: "space-between",
-            }}>
-              <span>You {isHost && "👑"}</span>
-              <span>{micOn ? "🎤" : "🔇"}</span>
+              alignItems: "center",
+              borderBottom: "1px solid rgba(255,255,255,0.1)",
+            }}
+          >
+            <div>
+              <h5 style={{ color: "#fff", margin: 0, fontSize: "16px" }}>
+                {currentRoomTitle}
+              </h5>
+              <div
+                style={{ color: "#999", fontSize: "12px", marginTop: "4px" }}
+              >
+                <FaClock style={{ marginRight: "6px" }} />
+                {formatDuration(callDuration)}
+                {isHost && (
+                  <Badge
+                    bg="success"
+                    style={{ marginLeft: "8px", fontSize: "10px" }}
+                  >
+                    HOST
+                  </Badge>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <Badge bg="secondary" style={{ padding: "6px 12px" }}>
+                Room: {currentRoomCode}
+              </Badge>
+              <Button
+                size="sm"
+                variant="link"
+                onClick={() => copyRoomCode(currentRoomCode || "")}
+              >
+                {copiedCode === currentRoomCode ? (
+                  <FaCheck color="#4CAF50" />
+                ) : (
+                  <FaCopy />
+                )}
+              </Button>
             </div>
           </div>
 
-          {/* Other Participants */}
-          {participants.filter(p => !p.isSelf).map((participant) => (
-            <ParticipantThumbnailSimple
-              key={participant.socketId || participant.id}
-              participant={participant}
-              isActive={activeSpeakerId === (participant.socketId || participant.id)}
-              onSelect={() => {
-                if (participant.stream) {
-                  switchToSpeaker(participant.socketId || participant.id, participant.stream);
-                }
-              }}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* RIGHT SIDEBAR - Chat & People */}
+           {/* ✅ NOTIFICATION - CORRECT PLACEMENT */}
+    {notification && (
       <div style={{
-        width: "320px",
-        background: "#fff",
-        display: "flex",
-        flexDirection: "column",
-        borderLeft: "1px solid #ddd",
-      }} className="d-none d-lg-flex">
-        
-        <Tab.Container defaultActiveKey="chat">
-          <Nav variant="tabs" style={{ borderBottom: "1px solid #ddd" }}>
-            <Nav.Item style={{ flex: 1 }}>
-              <Nav.Link eventKey="chat" style={{ textAlign: "center", fontSize: "13px", padding: "10px" }}>
-                <FaComments style={{ marginRight: "5px" }} /> Chat
-              </Nav.Link>
-            </Nav.Item>
-            <Nav.Item style={{ flex: 1 }}>
-              <Nav.Link eventKey="people" style={{ textAlign: "center", fontSize: "13px", padding: "10px" }}>
-                <FaUsers style={{ marginRight: "5px" }} /> People ({participants.length + 1})
-              </Nav.Link>
-            </Nav.Item>
-          </Nav>
+        position: "fixed",
+        top: "80px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        background: "rgba(0,0,0,0.85)",
+        color: "#fff",
+        padding: "12px 24px",
+        borderRadius: "8px",
+        zIndex: 10001,
+        fontSize: "14px",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+      }}>
+        {notification}
+      </div>
+    )}
 
-          <Tab.Content style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            {/* CHAT TAB */}
-            <Tab.Pane eventKey="chat" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-              <div style={{ flex: 1, overflowY: "auto", padding: "15px", background: "#f9f9f9" }}>
-                {messages.length === 0 ? (
-                  <p style={{ color: "#999", fontSize: "13px", textAlign: "center", marginTop: "20px" }}>
-                    No messages yet
+          {/* MAIN CONTENT - Video + Sidebar */}
+          <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+            {/* LEFT - Main Video Area */}
+            <div style={{ flex: 1, position: "relative", background: "#000" }}>
+              {/* Main Speaker Video */}
+              <video
+                ref={mainVideoRef}
+                autoPlay
+                playsInline
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "contain",
+                }}
+              />
+
+              {!activeSpeakerId && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    textAlign: "center",
+                    color: "#fff",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "60px",
+                      marginBottom: "16px",
+                      opacity: 0.4,
+                    }}
+                  >
+                    🎥
+                  </div>
+                  <h3
+                    style={{
+                      marginBottom: "8px",
+                      fontWeight: "500",
+                      fontSize: "20px",
+                    }}
+                  >
+                    Waiting for participants...
+                  </h3>
+                  <p style={{ color: "#999", fontSize: "14px" }}>
+                    Share room code: <strong>{currentRoomCode}</strong>
                   </p>
-                ) : (
-                  messages.map((m, idx) => (
-                    <div key={m.id || idx} style={{ marginBottom: "12px" }}>
-                      <div style={{ fontSize: "11px", color: "#666", marginBottom: "2px" }}>
-                        <strong>{m.user_name}</strong>
-                        <span style={{ marginLeft: "6px" }}>
-                          {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                      </div>
-                      <div style={{
-                        background: "#fff",
-                        padding: "8px 10px",
-                        borderRadius: "8px",
-                        fontSize: "13px",
-                        border: "1px solid #e0e0e0",
-                      }}>
-                        {m.message}
-                      </div>
-                    </div>
-                  ))
-                )}
-                <div ref={chatEndRef} />
-              </div>
-              <div style={{ padding: "12px", borderTop: "1px solid #ddd" }}>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <Form.Control
-                    size="sm"
-                    placeholder="Type a message..."
-                    value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
-                      }
+                </div>
+              )}
+
+              {/* Bottom Participant Thumbnails */}
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: "80px",
+                  left: "20px",
+                  display: "flex",
+                  gap: "12px",
+                  flexWrap: "wrap",
+                  maxWidth: "calc(100% - 40px)",
+                }}
+              >
+                {/* Your Video */}
+                <div
+                  style={{
+                    width: "180px",
+                    height: "120px",
+                    borderRadius: "12px",
+                    overflow: "hidden",
+                    border: "2px solid #4CAF50",
+                    background: "#000",
+                    position: "relative",
+                  }}
+                >
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      display: cameraOn ? "block" : "none",
                     }}
                   />
-                  <Button size="sm" variant="primary" onClick={sendMessage} disabled={!messageInput.trim()}>
-                    Send
-                  </Button>
+                  {!cameraOn && (
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        background:
+                          "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "40px",
+                          height: "40px",
+                          borderRadius: "50%",
+                          background: "rgba(255,255,255,0.25)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: "18px",
+                          color: "#fff",
+                          fontWeight: "600",
+                        }}
+                      >
+                        {session?.user?.user_metadata?.full_name?.[0]?.toUpperCase() ||
+                          "Y"}
+                      </div>
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: "6px",
+                      left: "6px",
+                      right: "6px",
+                      background: "rgba(0,0,0,0.8)",
+                      color: "#fff",
+                      padding: "4px 8px",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      display: "flex",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <span>You {isHost && "👑"}</span>
+                    <span>{micOn ? "🎤" : "🔇"}</span>
+                  </div>
                 </div>
-              </div>
-            </Tab.Pane>
 
-            {/* PEOPLE TAB */}
-            <Tab.Pane eventKey="people" style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-              {/* You */}
-              <div style={{
+                {/* Other Participants */}
+                {participants
+                  .filter((p) => !p.isSelf)
+                  .map((participant) => (
+                    <ParticipantThumbnailSimple
+                      key={participant.socketId || participant.id}
+                      participant={participant}
+                      isActive={
+                        activeSpeakerId ===
+                        (participant.socketId || participant.id)
+                      }
+                      onSelect={() => {
+                        if (participant.stream) {
+                          switchToSpeaker(
+                            participant.socketId || participant.id,
+                            participant.stream
+                          );
+                        }
+                      }}
+                    />
+                  ))}
+              </div>
+            </div>
+
+            {/* RIGHT SIDEBAR - Chat & People */}
+            <div
+              style={{
+                width: "320px",
+                background: "#fff",
+                display: "flex",
+                flexDirection: "column",
+                borderLeft: "1px solid #ddd",
+              }}
+              className="d-none d-lg-flex"
+            >
+              <Tab.Container defaultActiveKey="chat">
+                <Nav variant="tabs" style={{ borderBottom: "1px solid #ddd" }}>
+                  <Nav.Item style={{ flex: 1 }}>
+                    <Nav.Link
+                      eventKey="chat"
+                      style={{
+                        textAlign: "center",
+                        fontSize: "13px",
+                        padding: "10px",
+                      }}
+                    >
+                      <FaComments style={{ marginRight: "5px" }} /> Chat
+                    </Nav.Link>
+                  </Nav.Item>
+                  <Nav.Item style={{ flex: 1 }}>
+                    <Nav.Link
+                      eventKey="people"
+                      style={{
+                        textAlign: "center",
+                        fontSize: "13px",
+                        padding: "10px",
+                      }}
+                    >
+                      <FaUsers style={{ marginRight: "5px" }} /> People (
+                      {participants.length + 1})
+                    </Nav.Link>
+                  </Nav.Item>
+                </Nav>
+
+                <Tab.Content
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* CHAT TAB */}
+                  <Tab.Pane
+                    eventKey="chat"
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                  >
+                    <div
+                      style={{
+                        flex: 1,
+                        overflowY: "auto",
+                        padding: "15px",
+                        background: "#f9f9f9",
+                      }}
+                    >
+                      {messages.length === 0 ? (
+                        <p
+                          style={{
+                            color: "#999",
+                            fontSize: "13px",
+                            textAlign: "center",
+                            marginTop: "20px",
+                          }}
+                        >
+                          No messages yet
+                        </p>
+                      ) : (
+                        messages.map((m, idx) => (
+                          <div
+                            key={m.id || idx}
+                            style={{ marginBottom: "12px" }}
+                          >
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "#666",
+                                marginBottom: "2px",
+                              }}
+                            >
+                              <strong>{m.user_name}</strong>
+                              <span style={{ marginLeft: "6px" }}>
+                                {new Date(m.created_at).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                background: "#fff",
+                                padding: "8px 10px",
+                                borderRadius: "8px",
+                                fontSize: "13px",
+                                border: "1px solid #e0e0e0",
+                              }}
+                            >
+                              {m.message}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+                    <div
+                      style={{ padding: "12px", borderTop: "1px solid #ddd" }}
+                    >
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <Form.Control
+                          size="sm"
+                          placeholder="Type a message..."
+                          value={messageInput}
+                          onChange={(e) => setMessageInput(e.target.value)}
+                          onKeyPress={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              sendMessage();
+                            }
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={sendMessage}
+                          disabled={!messageInput.trim()}
+                        >
+                          Send
+                        </Button>
+                      </div>
+                    </div>
+                  </Tab.Pane>
+
+                  {/* PEOPLE TAB */}
+                  <Tab.Pane
+                    eventKey="people"
+                    style={{ flex: 1, overflowY: "auto", padding: "12px" }}
+                  >
+                    {/* You */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        padding: "8px",
+                        borderBottom: "1px solid #f0f0f0",
+                        background: "rgba(76, 175, 80, 0.1)",
+                        borderRadius: "8px",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "36px",
+                          height: "36px",
+                          borderRadius: "50%",
+                          background:
+                            "linear-gradient(135deg, #4CAF50 0%, #45a049 100%)",
+                          color: "#fff",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          marginRight: "10px",
+                          fontSize: "14px",
+                          fontWeight: "600",
+                        }}
+                      >
+                        {session?.user?.user_metadata?.full_name?.[0]?.toUpperCase() ||
+                          "Y"}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: "13px", fontWeight: "600" }}>
+                          You {isHost && "👑"}
+                        </div>
+                        {isHost && (
+                          <Badge bg="success" style={{ fontSize: "9px" }}>
+                            Host
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Other Participants */}
+                    {participants.filter((p) => !p.isSelf).length === 0 ? (
+                      <p
+                        style={{
+                          color: "#999",
+                          fontSize: "12px",
+                          textAlign: "center",
+                          marginTop: "20px",
+                        }}
+                      >
+                        No other participants
+                      </p>
+                    ) : (
+                      participants
+                        .filter((p) => !p.isSelf)
+                        .map((p) => (
+                          <div
+                            key={p.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              padding: "8px",
+                              borderBottom: "1px solid #f0f0f0",
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: "36px",
+                                height: "36px",
+                                borderRadius: "50%",
+                                background:
+                                  "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                                color: "#fff",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                marginRight: "10px",
+                                fontSize: "14px",
+                                fontWeight: "600",
+                              }}
+                            >
+                              {p.user_name[0]?.toUpperCase()}
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div
+                                style={{ fontSize: "13px", fontWeight: "500" }}
+                              >
+                                {p.user_name}
+                              </div>
+                              {p.role === "host" && (
+                                <Badge bg="primary" style={{ fontSize: "9px" }}>
+                                  Host
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                    )}
+                  </Tab.Pane>
+                </Tab.Content>
+              </Tab.Container>
+            </div>
+          </div>
+
+          {/* BOTTOM CONTROLS */}
+          <div
+            style={{
+              background: "rgba(0,0,0,0.9)",
+              padding: "16px 24px",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "12px",
+              borderTop: "1px solid rgba(255,255,255,0.1)",
+            }}
+          >
+            <Button
+              onClick={toggleMic}
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                background: micOn ? "rgba(255,255,255,0.15)" : "#dc3545",
+                border: "none",
                 display: "flex",
                 alignItems: "center",
-                padding: "8px",
-                borderBottom: "1px solid #f0f0f0",
-                background: "rgba(76, 175, 80, 0.1)",
-                borderRadius: "8px",
-                marginBottom: "8px",
-              }}>
-                <div style={{
-                  width: "36px",
-                  height: "36px",
-                  borderRadius: "50%",
-                  background: "linear-gradient(135deg, #4CAF50 0%, #45a049 100%)",
-                  color: "#fff",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginRight: "10px",
-                  fontSize: "14px",
-                  fontWeight: "600",
-                }}>
-                  {session?.user?.user_metadata?.full_name?.[0]?.toUpperCase() || "Y"}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: "13px", fontWeight: "600" }}>
-                    You {isHost && "👑"}
-                  </div>
-                  {isHost && <Badge bg="success" style={{ fontSize: "9px" }}>Host</Badge>}
-                </div>
-              </div>
-
-              {/* Other Participants */}
-              {participants.filter(p => !p.isSelf).length === 0 ? (
-                <p style={{ color: "#999", fontSize: "12px", textAlign: "center", marginTop: "20px" }}>
-                  No other participants
-                </p>
+                justifyContent: "center",
+              }}
+            >
+              {micOn ? (
+                <FaMicrophone size={18} color="#fff" />
               ) : (
-                participants.filter(p => !p.isSelf).map((p) => (
-                  <div key={p.id} style={{
-                    display: "flex",
-                    alignItems: "center",
-                    padding: "8px",
-                    borderBottom: "1px solid #f0f0f0",
-                  }}>
-                    <div style={{
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "50%",
-                      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                      color: "#fff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      marginRight: "10px",
-                      fontSize: "14px",
-                      fontWeight: "600",
-                    }}>
-                      {p.user_name[0]?.toUpperCase()}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: "13px", fontWeight: "500" }}>{p.user_name}</div>
-                      {p.role === "host" && <Badge bg="primary" style={{ fontSize: "9px" }}>Host</Badge>}
-                    </div>
-                  </div>
-                ))
+                <FaMicrophoneSlash size={18} color="#fff" />
               )}
-            </Tab.Pane>
-          </Tab.Content>
-        </Tab.Container>
-      </div>
-    </div>
+            </Button>
 
-    {/* BOTTOM CONTROLS */}
-    <div style={{
-      background: "rgba(0,0,0,0.9)",
-      padding: "16px 24px",
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      gap: "12px",
-      borderTop: "1px solid rgba(255,255,255,0.1)",
-    }}>
-      <Button
-        onClick={toggleMic}
-        style={{
-          width: "48px",
-          height: "48px",
-          borderRadius: "50%",
-          background: micOn ? "rgba(255,255,255,0.15)" : "#dc3545",
-          border: "none",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {micOn ? <FaMicrophone size={18} color="#fff" /> : <FaMicrophoneSlash size={18} color="#fff" />}
-      </Button>
+            <Button
+              onClick={toggleCamera}
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                background: cameraOn ? "rgba(255,255,255,0.15)" : "#dc3545",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {cameraOn ? (
+                <FaVideo size={18} color="#fff" />
+              ) : (
+                <FaVideoSlash size={18} color="#fff" />
+              )}
+            </Button>
 
-      <Button
-        onClick={toggleCamera}
-        style={{
-          width: "48px",
-          height: "48px",
-          borderRadius: "50%",
-          background: cameraOn ? "rgba(255,255,255,0.15)" : "#dc3545",
-          border: "none",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {cameraOn ? <FaVideo size={18} color="#fff" /> : <FaVideoSlash size={18} color="#fff" />}
-      </Button>
+            <Button
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                background: "rgba(255,255,255,0.15)",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              title="Share Screen"
+            >
+              <FaDesktop size={18} color="#fff" />
+            </Button>
 
+            
+             {/* ✅ HOST GETS BOTH BUTTONS */}
+  {isHost ? (
+    <>
       <Button
+        onClick={handleEndCall}
         style={{
-          width: "48px",
           height: "48px",
-          borderRadius: "50%",
+          borderRadius: "24px",
           background: "rgba(255,255,255,0.15)",
-          border: "none",
+          border: "1px solid rgba(255,255,255,0.3)",
+          padding: "0 20px",
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
+          gap: "8px",
+          fontSize: "14px",
+          fontWeight: "600",
+          color: "#fff",
         }}
-        title="Share Screen"
+        title="Leave (Meeting continues)"
       >
-        <FaDesktop size={18} color="#fff" />
+        <FaPhoneSlash size={16} />
+        Leave
       </Button>
+      
+      <Button
+        onClick={handleEndMeeting}
+        style={{
+          height: "48px",
+          borderRadius: "24px",
+          background: "#dc3545",
+          border: "none",
+          padding: "0 20px",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          fontSize: "14px",
+          fontWeight: "600",
+        }}
+        title="End meeting for everyone"
+      >
+        <FaPhoneSlash size={16} />
+        End Meeting
+      </Button>
+    </>
+  ) : (
 
-      {isHost ? (
-        <Button
-          onClick={handleEndMeeting}
-          style={{
-            height: "48px",
-            borderRadius: "24px",
-            background: "#dc3545",
-            border: "none",
-            padding: "0 20px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            fontSize: "14px",
-            fontWeight: "600",
-          }}
-        >
-          <FaPhoneSlash size={16} />
-          End Meeting
-        </Button>
-      ) : (
-        <Button
-          onClick={handleEndCall}
-          style={{
-            width: "48px",
-            height: "48px",
-            borderRadius: "50%",
-            background: "#dc3545",
-            border: "none",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-          title="Leave Call"
-        >
-          <FaPhoneSlash size={18} color="#fff" />
-        </Button>
+    /* ✅ GUESTS ONLY GET LEAVE */
+    <Button
+      onClick={handleEndCall}
+      style={{
+        height: "48px",
+        borderRadius: "24px",
+        background: "#dc3545",
+        border: "none",
+        padding: "0 20px",
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        fontSize: "14px",
+        fontWeight: "600",
+      }}
+      title="Leave Call"
+    >
+      <FaPhoneSlash size={16} />
+      Leave Call
+    </Button>
+            )}
+          </div>
+        </div>
       )}
-    </div>
-  </div>
-)}
 
       {/* CREATE MEETING MODAL */}
       <Modal show={showCreateModal} onHide={() => setShowCreateModal(false)}>
@@ -1918,6 +2190,90 @@ function ParticipantThumbnail({
           🔊 LIVE
         </div>
       )}
+    </div>
+  );
+}
+
+// Add this after the existing ParticipantThumbnail component
+function ParticipantThumbnailSimple({
+  participant,
+  isActive,
+  onSelect,
+}: ParticipantThumbnailProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current && participant.stream) {
+      videoRef.current.srcObject = participant.stream;
+      videoRef.current.play().catch((err) => console.error("Play error:", err));
+    }
+  }, [participant.stream]);
+
+  return (
+    <div
+      onClick={onSelect}
+      style={{
+        width: "180px",
+        height: "120px",
+        borderRadius: "12px",
+        overflow: "hidden",
+        border: isActive ? "2px solid #4CAF50" : "2px solid #555",
+        background: "#000",
+        cursor: "pointer",
+        position: "relative",
+      }}
+    >
+      {participant.stream ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      ) : (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          }}
+        >
+          <div
+            style={{
+              width: "40px",
+              height: "40px",
+              borderRadius: "50%",
+              background: "rgba(255,255,255,0.2)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "18px",
+              color: "#fff",
+              fontWeight: "600",
+            }}
+          >
+            {participant.user_name?.[0]?.toUpperCase() || "?"}
+          </div>
+        </div>
+      )}
+      <div
+        style={{
+          position: "absolute",
+          bottom: "6px",
+          left: "6px",
+          background: "rgba(0,0,0,0.8)",
+          color: "#fff",
+          padding: "4px 8px",
+          borderRadius: "6px",
+          fontSize: "11px",
+          fontWeight: "500",
+        }}
+      >
+        {participant.user_name} {participant.role === "host" && "👑"}
+      </div>
     </div>
   );
 }
